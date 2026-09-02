@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "run_name": "My-Custom-Data-Run-v1",
+  "seed": 1337,
+  "artifacts_dir": "D:/Projects/MOLT AI/custom/runs",
+  "telemetry_interval_seconds": 0.5,
+  "data": {
+    "kind": "text_bpe",
+    "source": "D:/Projects/my_custom_data.txt",
+    "prepared_dir": "D:/Projects/MOLT AI/custom/data/prepared",
+    "train_bytes": 5000000,
+    "validation_bytes": 500000,
+    "context_length": 512,
+    "vocab_size": 8192,
+    "sampling": "sequential",
+    "tokenizer_path": null
+  },
+  "model": {
+    "n_layers": 8,
+    "d_model": 512,
+    "n_heads": 8,
+    "mlp_ratio": 4,
+    "activation_checkpointing": false,
+    "parameter_dtype": "float32"
+  },
+  "training": {
+    "device": "cuda",
+    "precision": "bfloat16",
+    "optimizer": "adamw",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.1,
+    "micro_batch_size": 16,
+    "gradient_accumulation": 1,
+    "max_steps": 500,
+    "max_seconds": 600.0,
+    "eval_interval": 50,
+    "eval_batches": 10,
+    "checkpoint_interval": 250,
+    "save_final_checkpoint": true,
+    "gradient_clip": 1.0,
+    "warmup_steps": 20,
+    "min_learning_rate_ratio": 0.1,
+    "initialize_from_run": null,
+    "fused_optimizer": true
+  }
+}

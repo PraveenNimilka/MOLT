@@ -1,0 +1,48 @@
+<|question|>What kind of animal was Roxy?<|answer|>Roxy was a rhinoceros.<|endoftext|>
+<|question|>What did Roxy love to do?<|answer|>Roxy loved to climb.<|endoftext|>
+<|question|>Why could Roxy not climb the icy hill at first?<|answer|>The icy hill was very slippery, so Roxy kept falling down.<|endoftext|>
+<|question|>Why was Roxy sad?<|answer|>Roxy was sad because she could not climb the slippery icy hill.<|endoftext|>
+<|question|>Who asked Roxy why she was sad?<|answer|>A little bird named Billy asked Roxy why she was sad.<|endoftext|>
+<|question|>What was the little bird's name?<|answer|>The little bird was named Billy.<|endoftext|>
+<|question|>What idea did Billy have?<|answer|>Billy suggested finding big leaves to put under Roxy's feet.<|endoftext|>
+<|question|>What did Roxy put under her feet?<|answer|>Roxy put big leaves under her feet.<|endoftext|>
+<|question|>What helped Roxy climb the icy hill?<|answer|>Big leaves under her feet helped Roxy climb the icy hill.<|endoftext|>
+<|question|>Did Roxy slip after putting leaves under her feet?<|answer|>No. With the leaves under her feet, Roxy did not slip.<|endoftext|>
+<|question|>Where did Roxy reach after climbing?<|answer|>Roxy reached the top of the icy hill.<|endoftext|>
+<|question|>What lesson did Roxy learn?<|answer|>Roxy learned that a little help from a friend could help her do difficult things.<|endoftext|>
+<|question|>Who became Roxy's friend?<|answer|>Billy the little bird became Roxy's friend.<|endoftext|>
+<|question|>Name two things Roxy climbed before the icy hill.<|answer|>Roxy climbed trees and rocks.<|endoftext|>
+<|question|>How did the icy hill look and feel?<|answer|>The icy hill was shiny and cold.<|endoftext|>
+<|question|>Who owned the shiny car?<|answer|>Kitty owned the shiny car.<|endoftext|>
+<|question|>Why was Kitty's car bright and clean?<|answer|>Kitty polished the car every day.<|endoftext|>
+<|question|>Who admired Kitty's car?<|answer|>Spot admired Kitty's bright, clean car.<|endoftext|>
+<|question|>Why did Kitty and Spot look for water?<|answer|>They looked for water because they felt thirsty.<|endoftext|>
+<|question|>Where did Kitty and Spot drink water?<|answer|>They drank clear water from a small pond.<|endoftext|>
+<|question|>What happened after Kitty and Spot played together?<|answer|>They became best friends.<|endoftext|>
+<|question|>Was the pond water dirty?<|answer|>No. The pond water was clear.<|endoftext|>
+<|question|>How often did Kitty polish the car?<|answer|>Kitty polished the car every day.<|endoftext|>
+<|question|>What did Spot say about the car?<|answer|>Spot said that Kitty's car was bright and clean.<|endoftext|>
+<|question|>Tell me how Roxy finally climbed the hill.<|answer|>Billy helped Roxy find big leaves. Roxy put them under her feet, stopped slipping, and climbed to the top.<|endoftext|>
+<|question|>Which friend helped the rhinoceros?<|answer|>Billy, a little bird, helped the rhinoceros.<|endoftext|>
+<|question|>What was placed beneath Roxy's feet?<|answer|>Big leaves were placed beneath Roxy's feet.<|endoftext|>
+<|question|>Why were the leaves useful?<|answer|>The leaves helped Roxy keep from slipping on the icy hill.<|endoftext|>
+<|question|>Did Roxy give up after falling?<|answer|>No. Roxy accepted Billy's help and tried again.<|endoftext|>
+<|question|>What made the climb successful?<|answer|>Friendship, another attempt, and big leaves under Roxy's feet made the climb successful.<|endoftext|>
+<|question|>Complete the answer: Roxy used big ____ to climb.<|answer|>Roxy used big leaves to climb.<|endoftext|>
+<|question|>Answer briefly: What did Roxy use on the ice?<|answer|>Big leaves.<|endoftext|>
+<|question|>Who suggested using leaves?<|answer|>Billy suggested using leaves.<|endoftext|>
+<|question|>Where were the leaves placed?<|answer|>The leaves were placed under Roxy's feet.<|endoftext|>
+<|question|>What problem did the leaves solve?<|answer|>They stopped Roxy from slipping on the ice.<|endoftext|>
+<|question|>What did the friends do after Roxy reached the top?<|answer|>Roxy and Billy played on the icy hill all day.<|endoftext|>
+<|question|>Give a one-sentence summary of Roxy's story.<|answer|>A bird helped Roxy use big leaves to climb a slippery icy hill.<|endoftext|>
+<|question|>Was Billy a large animal?<|answer|>No. Billy was a little bird.<|endoftext|>
+<|question|>Was Roxy a bird?<|answer|>No. Roxy was a rhinoceros.<|endoftext|>
+<|question|>What was cold in Roxy's story?<|answer|>The icy hill was cold.<|endoftext|>
+<|question|>Paraphrase the solution to Roxy's problem.<|answer|>She put large leaves beneath her feet so she could grip the slippery hill and climb it.<|endoftext|>
+<|question|>In the story, what prevented slipping?<|answer|>Putting big leaves under Roxy's feet prevented slipping.<|endoftext|>
+<|question|>What simple objects helped Roxy reach the top?<|answer|>Big leaves helped her reach the top.<|endoftext|>
+<|question|>How did Billy behave toward Roxy?<|answer|>Billy was kind and helped Roxy solve her problem.<|endoftext|>
+<|question|>What does the story teach about friends?<|answer|>The story teaches that help from a friend can make a difficult task possible.<|endoftext|>
+<|question|>Respond with the missing word: Roxy put big ____ under her feet.<|answer|>leaves<|endoftext|>
+<|question|>What should Roxy thank Billy for?<|answer|>Roxy should thank Billy for the idea of using big leaves to climb safely.<|endoftext|>
+<|question|>How were Roxy and Billy connected at the end?<|answer|>They were best friends who climbed and played together.<|endoftext|>

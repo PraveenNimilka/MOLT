@@ -1,0 +1,392 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from molt_stream.core.contracts import TelemetryPoint
+
+if TYPE_CHECKING:
+    from molt_stream.core.specs import TrainingSpec
+
+
+def latest_temperature_c(points: Sequence[TelemetryPoint]) -> float | None:
+    return next(
+        (float(point.gpu_temperature_c) for point in reversed(points) if point.gpu_temperature_c is not None),
+        None,
+    )
+
+
+def latest_telemetry_point(points: Sequence[TelemetryPoint]) -> TelemetryPoint | None:
+    """Return the newest GPU-temperature sample without copying telemetry."""
+    return next((point for point in reversed(points) if point.gpu_temperature_c is not None), None)
+
+
+@dataclass(frozen=True)
+class ThermalDecision:
+    pause_seconds: float
+    temperature_c: float | None
+    filtered_temperature_c: float | None
+    heating_rate_c_per_second: float
+    projected_temperature_c: float | None
+    abort: bool
+    phase: str
+
+
+class ZonedThermalController:
+    """Deterministic pacing plus an independent emergency safety boundary.
+
+    The normal cruise window uses smoothstep interpolation so adjacent whole-
+    degree NVML samples do not create large pause jumps. Above the cruise
+    ceiling, a longer recovery pause is allowed; the advertised 10-25 ms bound
+    applies only inside the normal cruise window.
+    """
+
+    def __init__(
+        self,
+        *,
+        target_c: float,
+        cruise_max_c: float,
+        abort_c: float,
+        minimum_pause_seconds: float = 0.010,
+        maximum_pause_seconds: float = 0.025,
+        protective_pause_seconds: float = 0.100,
+        protective_hysteresis_c: float = 2.0,
+    ) -> None:
+        if not 0 < target_c < cruise_max_c < abort_c:
+            raise ValueError("thermal zones must satisfy target < cruise max < abort")
+        if not 0 <= minimum_pause_seconds <= maximum_pause_seconds:
+            raise ValueError("minimum pause must not exceed maximum pause")
+        if protective_pause_seconds < maximum_pause_seconds:
+            raise ValueError("protective pause must be at least the cruise maximum")
+        if not 0 < protective_hysteresis_c < (cruise_max_c - target_c):
+            raise ValueError("protective hysteresis must fit inside the cruise window")
+        self.target_c = target_c
+        self.cruise_max_c = cruise_max_c
+        self.abort_c = abort_c
+        self.minimum_pause_seconds = minimum_pause_seconds
+        self.maximum_pause_seconds = maximum_pause_seconds
+        self.protective_pause_seconds = protective_pause_seconds
+        self.protective_hysteresis_c = protective_hysteresis_c
+        self._protective_latched = False
+
+    def update(
+        self,
+        point: TelemetryPoint | None,
+        *,
+        step_seconds: float,
+    ) -> ThermalDecision:
+        if step_seconds <= 0:
+            raise ValueError("step_seconds must be positive")
+        if point is None or point.gpu_temperature_c is None:
+            return ThermalDecision(0.0, None, None, 0.0, None, False, "no-telemetry")
+        temperature = float(point.gpu_temperature_c)
+        if temperature >= self.abort_c:
+            return ThermalDecision(
+                0.0, temperature, temperature, 0.0, temperature, True, "thermal-abort"
+            )
+        if self._protective_latched:
+            if temperature <= self.cruise_max_c - self.protective_hysteresis_c:
+                self._protective_latched = False
+            else:
+                return ThermalDecision(
+                    self.protective_pause_seconds,
+                    temperature,
+                    temperature,
+                    0.0,
+                    temperature,
+                    False,
+                    "protective-cooling",
+                )
+        if temperature < self.target_c:
+            return ThermalDecision(
+                0.0, temperature, temperature, 0.0, temperature, False, "full-speed"
+            )
+        if temperature <= self.cruise_max_c:
+            fraction = (temperature - self.target_c) / (
+                self.cruise_max_c - self.target_c
+            )
+            smooth = fraction * fraction * (3.0 - 2.0 * fraction)
+            pause = self.minimum_pause_seconds + smooth * (
+                self.maximum_pause_seconds - self.minimum_pause_seconds
+            )
+            return ThermalDecision(
+                pause, temperature, temperature, 0.0, temperature, False, "cooling"
+            )
+        self._protective_latched = True
+        return ThermalDecision(
+            self.protective_pause_seconds,
+            temperature,
+            temperature,
+            0.0,
+            temperature,
+            False,
+            "protective-cooling",
+        )
+
+
+class SteadyDutyThermalController:
+    """Constant proactive pacing with a hotter protective recovery latch."""
+
+    def __init__(
+        self,
+        *,
+        steady_pause_seconds: float,
+        protective_c: float,
+        abort_c: float,
+        protective_pause_seconds: float = 0.100,
+        protective_hysteresis_c: float = 2.0,
+    ) -> None:
+        if steady_pause_seconds < 0:
+            raise ValueError("steady pause must be non-negative")
+        if not 0 < protective_c < abort_c:
+            raise ValueError("protective temperature must be below abort")
+        if protective_pause_seconds < steady_pause_seconds:
+            raise ValueError("protective pause must be at least the steady pause")
+        if not 0 < protective_hysteresis_c < protective_c:
+            raise ValueError("protective hysteresis must be positive and bounded")
+        self.steady_pause_seconds = steady_pause_seconds
+        self.protective_c = protective_c
+        self.abort_c = abort_c
+        self.protective_pause_seconds = protective_pause_seconds
+        self.protective_hysteresis_c = protective_hysteresis_c
+        self._protective_latched = False
+
+    def update(
+        self,
+        point: TelemetryPoint | None,
+        *,
+        step_seconds: float,
+    ) -> ThermalDecision:
+        if step_seconds <= 0:
+            raise ValueError("step_seconds must be positive")
+        if point is None or point.gpu_temperature_c is None:
+            return ThermalDecision(
+                self.steady_pause_seconds, None, None, 0.0, None, False, "cooling"
+            )
+        temperature = float(point.gpu_temperature_c)
+        if temperature >= self.abort_c:
+            return ThermalDecision(
+                0.0, temperature, temperature, 0.0, temperature, True, "thermal-abort"
+            )
+        if self._protective_latched:
+            if temperature <= self.protective_c - self.protective_hysteresis_c:
+                self._protective_latched = False
+            else:
+                return ThermalDecision(
+                    self.protective_pause_seconds,
+                    temperature,
+                    temperature,
+                    0.0,
+                    temperature,
+                    False,
+                    "protective-cooling",
+                )
+        if temperature >= self.protective_c:
+            self._protective_latched = True
+            return ThermalDecision(
+                self.protective_pause_seconds,
+                temperature,
+                temperature,
+                0.0,
+                temperature,
+                False,
+                "protective-cooling",
+            )
+        return ThermalDecision(
+            self.steady_pause_seconds,
+            temperature,
+            temperature,
+            0.0,
+            temperature,
+            False,
+            "cooling",
+        )
+
+
+class ThermalCruiseController:
+    """Predictive host-side pacing for a thermally constrained training loop.
+
+    This is deliberately a controller, not a claim of a new optimization
+    algorithm. It filters NVML's integer temperature samples, estimates the
+    heating slope, projects that slope over a short horizon, and controls idle
+    time before the measured temperature crosses the target. All pauses are
+    outside CUDA work and therefore included in end-to-end throughput.
+    """
+
+    def __init__(
+        self,
+        *,
+        target_c: float,
+        abort_c: float,
+        lookahead_seconds: float = 1.5,
+        stability_band_c: float = 1.5,
+        initial_pause_seconds: float = 0.0,
+        maximum_pause_seconds: float = 0.25,
+        power_target_watts: float | None = None,
+    ) -> None:
+        if not 0 < target_c < abort_c:
+            raise ValueError("target_c must be positive and below abort_c")
+        if lookahead_seconds <= 0 or stability_band_c <= 0:
+            raise ValueError("lookahead and stability band must be positive")
+        if power_target_watts is not None and power_target_watts <= 0:
+            raise ValueError("power target must be positive when provided")
+        if not 0 <= initial_pause_seconds <= maximum_pause_seconds:
+            raise ValueError("initial pause must be between zero and maximum pause")
+        self.target_c = target_c
+        self.abort_c = abort_c
+        self.lookahead_seconds = lookahead_seconds
+        self.stability_band_c = stability_band_c
+        self.initial_pause_seconds = initial_pause_seconds
+        self.maximum_pause_seconds = maximum_pause_seconds
+        self.power_target_watts = power_target_watts
+        self._filtered_temperature_c: float | None = None
+        self._filtered_slope = 0.0
+        self._last_sample_time: float | None = None
+        self._last_pause_seconds = initial_pause_seconds
+        self._pause_to_compute_ratio: float | None = None
+        self._cruise_ratio: float | None = None
+        self._filtered_power_watts: float | None = None
+
+    def update(
+        self,
+        point: TelemetryPoint | None,
+        *,
+        step_seconds: float,
+    ) -> ThermalDecision:
+        if step_seconds <= 0:
+            raise ValueError("step_seconds must be positive")
+        if point is None or point.gpu_temperature_c is None:
+            pause = self._last_pause_seconds
+            return ThermalDecision(pause, None, None, 0.0, None, False, "no-telemetry")
+
+        temperature = float(point.gpu_temperature_c)
+        if point.gpu_power_watts is not None:
+            power = float(point.gpu_power_watts)
+            if self._filtered_power_watts is None:
+                self._filtered_power_watts = power
+            else:
+                self._filtered_power_watts += 0.30 * (power - self._filtered_power_watts)
+        previous_filtered = self._filtered_temperature_c
+        if previous_filtered is None:
+            self._filtered_temperature_c = temperature
+        else:
+            self._filtered_temperature_c += 0.20 * (temperature - self._filtered_temperature_c)
+
+        if (
+            self._last_sample_time is not None
+            and previous_filtered is not None
+            and point.monotonic_seconds > self._last_sample_time
+        ):
+            elapsed = point.monotonic_seconds - self._last_sample_time
+            raw_slope = (self._filtered_temperature_c - previous_filtered) / elapsed
+            raw_slope = max(-2.0, min(2.0, raw_slope))
+            self._filtered_slope += 0.20 * (raw_slope - self._filtered_slope)
+        self._last_sample_time = point.monotonic_seconds
+
+        projected = self._filtered_temperature_c + max(0.0, self._filtered_slope) * self.lookahead_seconds
+        control_edge = self.target_c - self.stability_band_c / 2.0
+        projected_error = projected - control_edge
+        if self._pause_to_compute_ratio is None:
+            self._pause_to_compute_ratio = self.initial_pause_seconds / step_seconds
+            self._cruise_ratio = self._pause_to_compute_ratio
+        assert self._cruise_ratio is not None
+        # Learn the equilibrium duty ratio slowly and symmetrically. Keeping
+        # this state separate from fast feedback prevents integral wind-up.
+        equilibrium_error = self._filtered_temperature_c - self.target_c
+        self._cruise_ratio = max(
+            0.0,
+            min(4.0, self._cruise_ratio + max(-0.03, min(0.03, 0.01 * equilibrium_error))),
+        )
+        desired_ratio = max(
+            0.0,
+            min(
+                4.0,
+                self._cruise_ratio
+                + 0.14 * max(0.0, projected_error)
+                + 0.08 * max(0.0, self._filtered_slope),
+            ),
+        )
+        if self.power_target_watts is not None and self._filtered_power_watts is not None:
+            # Approximate the idle board draw conservatively. For active power
+            # P and target average T, pause/compute ~= (P-T)/(T-P_idle).
+            idle_power_watts = min(15.0, 0.5 * self.power_target_watts)
+            denominator = max(self.power_target_watts - idle_power_watts, 1.0)
+            power_feed_forward = max(
+                0.0,
+                (self._filtered_power_watts - self.power_target_watts) / denominator,
+            )
+            desired_ratio = max(desired_ratio, min(4.0, power_feed_forward))
+        self._pause_to_compute_ratio += 0.18 * (
+            desired_ratio - self._pause_to_compute_ratio
+        )
+        if projected_error > 0:
+            phase = "braking" if projected >= self.target_c else "approach"
+        else:
+            phase = "cruise" if abs(self._filtered_temperature_c - self.target_c) <= self.stability_band_c else "warmup"
+        pause = step_seconds * self._pause_to_compute_ratio
+        pause = min(self.maximum_pause_seconds, pause)
+        self._last_pause_seconds = pause
+        return ThermalDecision(
+            pause,
+            temperature,
+            self._filtered_temperature_c,
+            self._filtered_slope,
+            projected,
+            temperature >= self.abort_c,
+            phase,
+        )
+
+
+def build_thermal_controller(
+    spec: TrainingSpec,
+) -> ThermalCruiseController | ZonedThermalController | SteadyDutyThermalController | None:
+    """Build the explicitly configured controller without hidden fallback."""
+    if spec.thermal_control_mode == "predictive-cruise":
+        return ThermalCruiseController(
+            target_c=spec.thermal_target_c,
+            abort_c=spec.thermal_abort_c,
+            lookahead_seconds=spec.thermal_lookahead_seconds,
+            stability_band_c=spec.thermal_stability_band_c,
+            initial_pause_seconds=spec.thermal_initial_pause_seconds,
+            maximum_pause_seconds=spec.thermal_max_pause_seconds,
+            power_target_watts=spec.thermal_power_target_watts,
+        )
+    if spec.thermal_control_mode == "zone-cruise":
+        if spec.thermal_cruise_max_c is None:
+            raise ValueError("zone-cruise requires thermal_cruise_max_c")
+        return ZonedThermalController(
+            target_c=spec.thermal_target_c,
+            cruise_max_c=spec.thermal_cruise_max_c,
+            abort_c=spec.thermal_abort_c,
+            minimum_pause_seconds=spec.min_pause_ms / 1000.0,
+            maximum_pause_seconds=spec.max_pause_ms / 1000.0,
+            protective_pause_seconds=spec.thermal_protective_pause_ms / 1000.0,
+            protective_hysteresis_c=spec.thermal_protective_hysteresis_c,
+        )
+    if spec.thermal_control_mode == "steady-duty":
+        if spec.thermal_cruise_max_c is None:
+            raise ValueError("steady-duty requires thermal_cruise_max_c")
+        return SteadyDutyThermalController(
+            steady_pause_seconds=spec.thermal_steady_pause_ms / 1000.0,
+            protective_c=spec.thermal_cruise_max_c,
+            abort_c=spec.thermal_abort_c,
+            protective_pause_seconds=spec.thermal_protective_pause_ms / 1000.0,
+            protective_hysteresis_c=spec.thermal_protective_hysteresis_c,
+        )
+    return None
+
+
+def duty_cycle_pause_seconds(
+    temperature_c: float | None,
+    *,
+    target_c: float,
+    abort_c: float,
+    nominal_seconds: float = 0.04,
+) -> float:
+    """Return a bounded 30-50 ms pause proportional to target overshoot."""
+    if temperature_c is None or temperature_c <= target_c:
+        return 0.0
+    span = max(abort_c - target_c, 1e-6)
+    fraction = min(1.0, (temperature_c - target_c) / span)
+    return min(0.05, max(0.03, nominal_seconds + 0.01 * (2.0 * fraction - 1.0)))

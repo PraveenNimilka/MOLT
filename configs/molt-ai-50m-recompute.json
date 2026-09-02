@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_name": "MOLT-AI-50M-recompute-H4b",
+  "seed": 1337,
+  "artifacts_dir": "D:/Projects/MOLT AI/50M/runs",
+  "telemetry_interval_seconds": 0.2,
+  "data": {
+    "kind": "text_bpe",
+    "source": "D:/Projects/MOLT AI/Dataset/TinyStories-valid.txt",
+    "prepared_dir": "D:/Projects/MOLT AI/50M/data/tinystories-bpe8192",
+    "train_bytes": 18474000,
+    "validation_bytes": 1000000,
+    "context_length": 512,
+    "vocab_size": 8192,
+    "sampling": "sequential",
+    "tokenizer_path": null
+  },
+  "model": {
+    "n_layers": 9,
+    "d_model": 640,
+    "n_heads": 10,
+    "mlp_ratio": 4,
+    "activation_checkpointing": true,
+    "activation_dtype": "parameter",
+    "parameter_dtype": "float32"
+  },
+  "training": {
+    "device": "cuda",
+    "precision": "bfloat16",
+    "optimizer": "adamw",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.1,
+    "micro_batch_size": 24,
+    "gradient_accumulation": 1,
+    "max_steps": 719,
+    "max_seconds": 900.0,
+    "eval_interval": 90,
+    "eval_batches": 16,
+    "checkpoint_interval": 180,
+    "save_final_checkpoint": true,
+    "gradient_clip": 1.0,
+    "warmup_steps": 36,
+    "min_learning_rate_ratio": 0.1,
+    "initialize_from_run": null,
+    "fused_optimizer": true
+  }
+}

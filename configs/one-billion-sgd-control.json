@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "run_name": "EXP-1003-1b-sgd-control",
+  "seed": 1337,
+  "artifacts_dir": "artifacts/runs",
+  "telemetry_interval_seconds": 0.1,
+  "data": {"kind": "synthetic", "prepared_dir": "data/prepared/one-billion", "train_bytes": 100000, "validation_bytes": 10000, "context_length": 8, "vocab_size": 256},
+  "model": {"n_layers": 20, "d_model": 2048, "n_heads": 16, "mlp_ratio": 4, "activation_checkpointing": true, "parameter_dtype": "bfloat16"},
+  "training": {"device": "cuda", "precision": "bfloat16", "optimizer": "sgd", "learning_rate": 0.01, "weight_decay": 0.0, "micro_batch_size": 1, "gradient_accumulation": 1, "max_steps": 128, "max_seconds": 540.0, "eval_interval": 32, "eval_batches": 8, "checkpoint_interval": 0, "save_final_checkpoint": false, "gradient_clip": 1.0}
+}

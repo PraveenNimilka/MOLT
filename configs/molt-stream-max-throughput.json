@@ -1,0 +1,46 @@
+{
+  "mode": "pretrain",
+  "data": {
+    "path": "D:/Projects/MOLT AI/50M/data/tinystories-bpe8192/train.bin",
+    "validation_path": "D:/Projects/MOLT AI/50M/data/tinystories-bpe8192/validation.bin",
+    "context_length": 512,
+    "storage_dtype": "int32",
+    "sequential": true,
+    "packing": "contiguous"
+  },
+  "model": {
+    "vocab_size": 8192,
+    "context_length": 512,
+    "layers": 6,
+    "width": 320,
+    "heads": 8,
+    "hidden_width": 960
+  },
+  "stream": {
+    "device": "cuda",
+    "compute_dtype": "bfloat16",
+    "quant_block_size": 64,
+    "lora_rank": 8,
+    "lora_alpha": 16.0,
+    "double_buffer": true,
+    "bundle_size": 4,
+    "cuda_graphs": false,
+    "pin_host_memory": true
+  },
+  "batch_size": 32,
+  "gradient_accumulation": 1,
+  "max_steps": 500,
+  "learning_rate": 0.0003,
+  "seed": 1337,
+  "execution_backend": "compile-max-autotune-no-cudagraphs",
+  "thermal_target_c": 68.0,
+  "thermal_abort_c": 72.0,
+  "thermal_pause_seconds": 0.04,
+  "thermal_control_mode": "predictive-cruise",
+  "thermal_lookahead_seconds": 1.5,
+  "thermal_max_pause_seconds": 0.4,
+  "thermal_initial_pause_seconds": 0.002,
+  "thermal_stability_band_c": 1.5,
+  "thermal_power_target_watts": 50.0,
+  "artifacts_dir": "artifacts/molt-stream/runs"
+}

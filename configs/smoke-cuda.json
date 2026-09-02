@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "run_name": "smoke-cuda",
+  "seed": 1337,
+  "artifacts_dir": "artifacts/runs",
+  "telemetry_interval_seconds": 0.1,
+  "data": {
+    "kind": "synthetic",
+    "prepared_dir": "data/prepared/smoke",
+    "train_bytes": 20000,
+    "validation_bytes": 4000,
+    "context_length": 64,
+    "vocab_size": 256
+  },
+  "model": {
+    "n_layers": 4,
+    "d_model": 256,
+    "n_heads": 8,
+    "mlp_ratio": 4,
+    "activation_checkpointing": false,
+    "parameter_dtype": "float32"
+  },
+  "training": {
+    "device": "cuda",
+    "precision": "bfloat16",
+    "optimizer": "adamw",
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "micro_batch_size": 8,
+    "gradient_accumulation": 1,
+    "max_steps": 10,
+    "eval_interval": 5,
+    "eval_batches": 2,
+    "checkpoint_interval": 5,
+    "save_final_checkpoint": true,
+    "gradient_clip": 1.0
+  }
+}

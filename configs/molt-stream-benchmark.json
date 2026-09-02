@@ -1,0 +1,34 @@
+{
+  "mode": "pretrain",
+  "data": {
+    "path": "data/prepared/smoke/train.bin",
+    "validation_path": "data/prepared/smoke/validation.bin",
+    "context_length": 32,
+    "storage_dtype": "uint8",
+    "sequential": true,
+    "packing": "contiguous"
+  },
+  "model": {
+    "vocab_size": 256,
+    "context_length": 32,
+    "layers": 2,
+    "width": 128,
+    "heads": 4,
+    "hidden_width": 384
+  },
+  "stream": {
+    "device": "cuda",
+    "compute_dtype": "bfloat16",
+    "quant_block_size": 64,
+    "lora_rank": 8,
+    "lora_alpha": 16.0,
+    "double_buffer": true,
+    "pin_host_memory": true
+  },
+  "batch_size": 8,
+  "gradient_accumulation": 1,
+  "max_steps": 200,
+  "learning_rate": 0.001,
+  "seed": 1337,
+  "artifacts_dir": "artifacts/molt-stream/runs"
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "base_run": "20260901-093650-MOLT-AI-50M-BPE-pretrain-v1-68ba7279",
+  "qa_behavior_run": "20260901-094628-MOLT-AI-50M-BPE-QA-masked-v2-1d782a20",
+  "qa_early_stop_control": "20260901-094747-MOLT-AI-50M-BPE-QA-earlystop-v3-066f6358",
+  "tests": [
+    {
+      "mode": "story",
+      "prompt": "Once upon a time",
+      "result_excerpt": "there was a little girl named Lily. She loved to play in the house. One day, she went outside and saw a big tree",
+      "assessment": "passed readable-English and multi-sentence structure gate; imperfect consistency remains"
+    },
+    {
+      "mode": "qa",
+      "prompt": "What did Roxy put under her feet?",
+      "result": "Roxy put big leaves under her feet.",
+      "assessment": "passed registered direct factual gate"
+    },
+    {
+      "mode": "qa",
+      "prompt": "What simple objects helped Roxy reach the top?",
+      "result": "Big leaves under her feet helped Roxy climb the icy hill.",
+      "assessment": "passed held-out paraphrase behavior gate"
+    }
+  ],
+  "limitations": [
+    "single pretraining seed",
+    "small TinyStories-only corpus",
+    "QA behavior checkpoint overfits aggregate held-out answer loss after step 20",
+    "QA facts cover a tiny manually reviewed domain",
+    "not a general assistant or production model"
+  ]
+}

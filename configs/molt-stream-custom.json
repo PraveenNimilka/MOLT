@@ -1,0 +1,36 @@
+{
+  "mode": "pretrain",
+  "data": {
+    "path": "D:/Projects/MOLT AI/custom/data/prepared/train.bin",
+    "validation_path": "D:/Projects/MOLT AI/custom/data/prepared/validation.bin",
+    "context_length": 512,
+    "storage_dtype": "int32",
+    "sequential": true,
+    "packing": "contiguous"
+  },
+  "model": {
+    "vocab_size": 8192,
+    "context_length": 512,
+    "layers": 8,
+    "width": 640,
+    "heads": 10,
+    "hidden_width": 2560
+  },
+  "stream": {
+    "device": "cuda",
+    "compute_dtype": "bfloat16",
+    "quant_block_size": 64,
+    "lora_rank": 8,
+    "lora_alpha": 16.0,
+    "double_buffer": false,
+    "cuda_graphs": false,
+    "pin_host_memory": true
+  },
+  "batch_size": 24,
+  "gradient_accumulation": 1,
+  "max_steps": 100,
+  "learning_rate": 0.0004,
+  "seed": 1337,
+  "execution_backend": "compile-max-autotune-no-cudagraphs",
+  "artifacts_dir": "artifacts/molt-stream/runs"
+}

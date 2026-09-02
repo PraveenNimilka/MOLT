@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "20260901-023504-MOLT-AI-1B-TinyStories-v1-fa3fdd64",
+  "checkpoint_step": 1024,
+  "checkpoint_tokens": 524288,
+  "tests": [
+    {
+      "prompt": "Once upon a time",
+      "temperature": 0.8,
+      "top_k": 40,
+      "seed": 1337,
+      "completion": " ais au t f astu w oa aiaor ts ace s armo bifmif atvflir a e vhe arl w ahe a ia\"e wotui apim# f Tr o awouer t. iipsird t",
+      "assessment": "failed coherent-story test"
+    },
+    {
+      "prompt": "Roxy was sad because",
+      "temperature": 0.7,
+      "top_k": 30,
+      "seed": 2027,
+      "completion": " h  oh od phe h . oa fid freiot thed atheiai\"nnlire e sie thar t he thera tfi Tnd shihe ath t hendohe ondon totheit bye ",
+      "assessment": "failed coherent-continuation test"
+    },
+    {
+      "prompt": "Question: What did Roxy put under her feet to climb the icy hill? Answer:",
+      "temperature": 0.0,
+      "top_k": 40,
+      "seed": 1,
+      "completion": " t a a a a a w a a a a a we a a a a a a a a a a a a a a a a a a a a a a as a a a",
+      "expected_answer": "big leaves",
+      "assessment": "failed dataset-question test"
+    }
+  ],
+  "conclusion": "The checkpoint learned held-out byte statistics but did not learn coherent generation or question answering at this training budget."
+}
