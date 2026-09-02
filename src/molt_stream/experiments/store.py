@@ -70,4 +70,7 @@ class AtomicCheckpointStore:
         raise IntegrityError(f"no valid checkpoint in {self.root}")
 
     def load(self, *, map_location: str | torch.device = "cpu") -> dict[str, Any]:
-        return torch.load(self.resolve(), map_location=map_location, weights_only=False)
+        value = torch.load(self.resolve(), map_location=map_location, weights_only=True)
+        if not isinstance(value, dict):
+            raise IntegrityError("checkpoint root must be a dictionary")
+        return value

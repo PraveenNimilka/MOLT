@@ -1,8 +1,8 @@
 {
   "mode": "pretrain",
   "data": {
-    "path": "D:/Projects/MOLT AI/custom/data/prepared/train.bin",
-    "validation_path": "D:/Projects/MOLT AI/custom/data/prepared/validation.bin",
+    "path": "${MOLT_DATA_ROOT}/custom/data/prepared/train.bin",
+    "validation_path": "${MOLT_DATA_ROOT}/custom/data/prepared/validation.bin",
     "context_length": 512,
     "storage_dtype": "int32",
     "sequential": true,

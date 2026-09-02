@@ -1,0 +1,42 @@
+{
+  "mode": "qlora",
+  "data": {
+    "path": "data/prepared/qwen2-0.5b/train.bin",
+    "validation_path": "data/prepared/qwen2-0.5b/validation.bin",
+    "context_length": 256,
+    "storage_dtype": "int32",
+    "sequential": true,
+    "packing": "contiguous"
+  },
+  "model": {
+    "vocab_size": 151936,
+    "context_length": 256,
+    "layers": 24,
+    "width": 896,
+    "heads": 14,
+    "hidden_width": 4864
+  },
+  "stream": {
+    "device": "cuda",
+    "compute_dtype": "bfloat16",
+    "quant_block_size": 64,
+    "lora_rank": 8,
+    "lora_alpha": 16.0,
+    "double_buffer": false,
+    "bundle_size": 4,
+    "cuda_graphs": false,
+    "pin_host_memory": true
+  },
+  "batch_size": 2,
+  "gradient_accumulation": 1,
+  "max_steps": 20,
+  "learning_rate": 0.0002,
+  "seed": 1337,
+  "artifacts_dir": "artifacts/qwen2-0.5b/runs",
+  "base_model": "${MOLT_QWEN_MODEL}",
+  "execution_backend": "eager",
+  "thermal_target_c": 65.0,
+  "thermal_abort_c": 75.0,
+  "thermal_pause_seconds": 0.04,
+  "thermal_control_mode": "reactive"
+}

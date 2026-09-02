@@ -1,9 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import os
+import re
+from dataclasses import asdict, dataclass, fields
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+
+_ENVIRONMENT_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+
+
+def _expand_config_path(value: str, field_name: str) -> str:
+    missing = sorted({
+        name
+        for match in _ENVIRONMENT_VARIABLE.finditer(value)
+        if (name := (match.group(1) or match.group(2))) not in os.environ
+    })
+    if missing:
+        raise ValueError(
+            f"{field_name} references unset environment variable(s): " + ", ".join(missing)
+        )
+    return os.path.expandvars(value)
 
 
 class TrainingMode(StrEnum):
@@ -18,6 +36,8 @@ class StreamSpec:
     quant_block_size: int = 64
     lora_rank: int = 8
     lora_alpha: float = 16.0
+    lora_target_modules: str = "all-linear"
+    lora_plus_lr_ratio: float | None = None
     double_buffer: bool = True
     bundle_size: int = 4
     cuda_graphs: bool = False
@@ -32,6 +52,15 @@ class StreamSpec:
             raise ValueError("quant_block_size must be even and >=16")
         if self.lora_rank <= 0 or self.lora_alpha <= 0:
             raise ValueError("LoRA rank and alpha must be positive")
+        if self.lora_plus_lr_ratio is not None and self.lora_plus_lr_ratio < 1:
+            raise ValueError("lora_plus_lr_ratio must be >= 1 when provided")
+        target_modules = [
+            name.strip() for name in self.lora_target_modules.split(",") if name.strip()
+        ]
+        if not target_modules:
+            raise ValueError("lora_target_modules must name at least one module")
+        if "all-linear" in target_modules and target_modules != ["all-linear"]:
+            raise ValueError("all-linear cannot be combined with explicit LoRA target modules")
         if self.bundle_size <= 0:
             raise ValueError("bundle_size must be positive")
 
@@ -83,11 +112,13 @@ class TrainingSpec:
     batch_size: int = 1
     gradient_accumulation: int = 1
     max_steps: int = 10
+    evaluation_interval: int | None = None
     learning_rate: float = 2e-4
     seed: int = 1337
     artifacts_dir: str = "artifacts/molt-stream"
     base_model: str | None = None
     execution_backend: str = "eager"
+    activation_checkpointing: bool = True
     thermal_target_c: float = 60.0
     thermal_abort_c: float = 72.0
     thermal_pause_seconds: float = 0.04
@@ -111,6 +142,8 @@ class TrainingSpec:
         self.stream.validate()
         if min(self.batch_size, self.gradient_accumulation, self.max_steps) <= 0:
             raise ValueError("batch, accumulation and max_steps must be positive")
+        if self.evaluation_interval is not None and self.evaluation_interval <= 0:
+            raise ValueError("evaluation_interval must be positive when provided")
         if self.learning_rate <= 0:
             raise ValueError("learning_rate must be positive")
         if self.execution_backend not in {
@@ -172,19 +205,39 @@ class TrainingSpec:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "TrainingSpec":
+        known_fields = {field.name for field in fields(cls)}
+        unknown_fields = sorted(set(value) - known_fields)
+        if unknown_fields:
+            raise ValueError(
+                "unknown training configuration field(s): " + ", ".join(unknown_fields)
+            )
+        data_value = dict(value["data"])
+        data_value["path"] = _expand_config_path(str(data_value["path"]), "data.path")
+        if data_value.get("validation_path") is not None:
+            data_value["validation_path"] = _expand_config_path(
+                str(data_value["validation_path"]), "data.validation_path"
+            )
+        base_model = value.get("base_model")
+        if base_model is not None:
+            base_model = _expand_config_path(str(base_model), "base_model")
         return cls(
             mode=TrainingMode(value["mode"]),
-            data=DataSpec(**value["data"]),
+            data=DataSpec(**data_value),
             model=ModelSpec(**value.get("model", {})),
             stream=StreamSpec(**value.get("stream", {})),
             batch_size=int(value.get("batch_size", 1)),
             gradient_accumulation=int(value.get("gradient_accumulation", 1)),
             max_steps=int(value.get("max_steps", 10)),
+            evaluation_interval=(
+                int(value["evaluation_interval"])
+                if value.get("evaluation_interval") is not None else None
+            ),
             learning_rate=float(value.get("learning_rate", 2e-4)),
             seed=int(value.get("seed", 1337)),
             artifacts_dir=str(value.get("artifacts_dir", "artifacts/molt-stream")),
-            base_model=value.get("base_model"),
+            base_model=base_model,
             execution_backend=str(value.get("execution_backend", "eager")),
+            activation_checkpointing=bool(value.get("activation_checkpointing", True)),
             thermal_target_c=float(value.get("thermal_target_c", 60.0)),
             thermal_abort_c=float(value.get("thermal_abort_c", 72.0)),
             thermal_pause_seconds=float(value.get("thermal_pause_seconds", 0.04)),

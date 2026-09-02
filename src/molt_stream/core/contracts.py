@@ -14,6 +14,10 @@ class TelemetryPoint:
     gpu_utilization_percent: float | None
     gpu_enforced_power_limit_watts: float | None
     gpu_clock_event_reasons: int | None
+    system_cpu_percent: float | None = None
+    system_available_memory_bytes: int | None = None
+    gpu_graphics_clock_mhz: int | None = None
+    gpu_memory_clock_mhz: int | None = None
 
 
 class TelemetrySampler(Protocol):

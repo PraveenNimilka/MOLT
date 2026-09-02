@@ -181,6 +181,10 @@ improvement was **not achieved**.
 
 ## Exact reproduction
 
+This is a historical `ai_local` command. Its source and configuration were
+retired from the active tree and remain recoverable from the initial Git commit;
+the command below is preserved only as the exact record of the rejected run.
+
 From `D:\Projects\MOLT`:
 
 ```powershell

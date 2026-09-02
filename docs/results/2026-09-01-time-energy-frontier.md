@@ -87,6 +87,10 @@ reopened.
 
 ## Reproduction
 
+These commands record the retired `ai_local` prototype. They are preserved as
+historical evidence and require the initial Git commit; they are not commands in
+the current MOLT interface.
+
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m ai_local.cli utilization-probe --config configs\molt-ai-50m-frontier-bf16-control.json --micro-batches 24,12,8,6,4,3,2,1 --warmup-steps 3 --steps 20

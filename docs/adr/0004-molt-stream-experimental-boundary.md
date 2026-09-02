@@ -1,6 +1,6 @@
 # ADR 0004: Keep MOLT-Stream experimental and capability-gated
 
-- Status: accepted
+- Status: superseded by the MOLT-only package consolidation on 2026-09-02
 - Date: 2026-09-01
 
 ## Decision
@@ -11,8 +11,9 @@ the CLI is outermost. An AST test enforces these ranks.
 
 Liger, Triton and external QLoRA runtimes are optional capabilities. Missing
 runtimes produce explicit errors. PyTorch fallbacks are labeled as fallbacks and
-cannot satisfy a fused-kernel claim. Stable `ai_local` code never imports the
-experimental streaming package.
+cannot satisfy a fused-kernel claim. At the time of this decision, stable
+`ai_local` code did not import the experimental streaming package. That package
+was subsequently retired; `molt_stream` is now the sole active implementation.
 
 ## Rationale
 

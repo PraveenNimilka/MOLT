@@ -95,13 +95,20 @@ class NVMLTelemetry:
                 self._handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             except Exception as exc:
                 self.errors.append(f"NVML unavailable: {type(exc).__name__}: {exc}")
+                if self._nvml is not None:
+                    try:
+                        self._nvml.nvmlShutdown()
+                    except Exception:
+                        pass
+                self._nvml = self._handle = None
         self._thread = threading.Thread(target=self._sample, daemon=True, name="molt-nvml")
         self._thread.start()
 
     def _sample(self) -> None:
         process = psutil.Process()
+        psutil.cpu_percent(interval=None)
         while not self._stop.is_set():
-            power = used = temp = util = limit = reasons = None
+            power = used = temp = util = limit = reasons = graphics_clock = memory_clock = None
             if self._nvml is not None:
                 try:
                     power = self._nvml.nvmlDeviceGetPowerUsage(self._handle) / 1000
@@ -110,12 +117,25 @@ class NVMLTelemetry:
                     util = float(self._nvml.nvmlDeviceGetUtilizationRates(self._handle).gpu)
                     limit = self._nvml.nvmlDeviceGetEnforcedPowerLimit(self._handle) / 1000
                     reasons = int(self._nvml.nvmlDeviceGetCurrentClocksThrottleReasons(self._handle))
+                    graphics_clock = int(
+                        self._nvml.nvmlDeviceGetClockInfo(
+                            self._handle, self._nvml.NVML_CLOCK_GRAPHICS
+                        )
+                    )
+                    memory_clock = int(
+                        self._nvml.nvmlDeviceGetClockInfo(
+                            self._handle, self._nvml.NVML_CLOCK_MEM
+                        )
+                    )
                 except Exception as exc:
-                    self.errors.append(f"NVML sample failed: {type(exc).__name__}: {exc}")
+                    message = f"NVML sample failed: {type(exc).__name__}: {exc}"
+                    if message not in self.errors and len(self.errors) < 32:
+                        self.errors.append(message)
             self.points.append(
                 TelemetryPoint(
                     time.perf_counter(), process.memory_info().rss, power, used, temp, util,
-                    limit, reasons,
+                    limit, reasons, psutil.cpu_percent(interval=None),
+                    int(psutil.virtual_memory().available), graphics_clock, memory_clock,
                 )
             )
             self._stop.wait(self.interval_seconds)
@@ -139,6 +159,19 @@ class NVMLTelemetry:
         for reason in reasons:
             reason_mask |= reason
         limits = [float(p.gpu_enforced_power_limit_watts) for p in self.points if p.gpu_enforced_power_limit_watts is not None]
+        system_cpu = [float(p.system_cpu_percent) for p in self.points if p.system_cpu_percent is not None]
+        available_memory = [
+            int(p.system_available_memory_bytes)
+            for p in self.points if p.system_available_memory_bytes is not None
+        ]
+        graphics_clocks = [
+            int(p.gpu_graphics_clock_mhz)
+            for p in self.points if p.gpu_graphics_clock_mhz is not None
+        ]
+        memory_clocks = [
+            int(p.gpu_memory_clock_mhz)
+            for p in self.points if p.gpu_memory_clock_mhz is not None
+        ]
         return {
             "sample_count": len(self.points), "gpu_board_energy_joules": energy,
             "mean_gpu_power_watts": sum(powers) / len(powers) if powers else None,
@@ -151,5 +184,11 @@ class NVMLTelemetry:
             "thermal_throttle_observed": any(reason & (0x20 | 0x40) for reason in reasons),
             "gpu_clock_event_reason_mask": reason_mask if reasons else None,
             "peak_process_rss_bytes": max((p.process_rss_bytes for p in self.points), default=None),
+            "mean_system_cpu_percent": sum(system_cpu) / len(system_cpu) if system_cpu else None,
+            "minimum_system_available_memory_bytes": min(available_memory) if available_memory else None,
+            "minimum_gpu_graphics_clock_mhz": min(graphics_clocks) if graphics_clocks else None,
+            "maximum_gpu_graphics_clock_mhz": max(graphics_clocks) if graphics_clocks else None,
+            "minimum_gpu_memory_clock_mhz": min(memory_clocks) if memory_clocks else None,
+            "maximum_gpu_memory_clock_mhz": max(memory_clocks) if memory_clocks else None,
             "errors": self.errors, "points": [asdict(point) for point in self.points],
         }

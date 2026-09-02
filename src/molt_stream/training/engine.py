@@ -95,6 +95,12 @@ def train(
         run.mkdir(parents=True, exist_ok=False)
         _write_json(run / "spec.resolved.json", spec.to_dict())
     store = AtomicCheckpointStore(run)
+    resume_state: dict[str, Any] | None = None
+    if resume:
+        resume_state = store.load(map_location="cpu")
+        saved_step = int(resume_state["step"])
+        if resume_state.get("termination_reason") == "completed" or saved_step >= spec.max_steps:
+            raise ValueError(f"run is already complete at step {saved_step}")
     total_started = time.perf_counter()
     telemetry = NVMLTelemetry(0.1, enable_gpu=device.type == "cuda")
     telemetry.start()
@@ -125,8 +131,8 @@ def train(
     )
     validation_batcher = MMapTokenBatcher(validation_spec, seed=spec.seed + 1, device=device)
     step = tokens = 0
-    if resume:
-        state = store.load(map_location=device)
+    if resume_state is not None:
+        state = resume_state
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         batcher.load_state_dict(state["batcher"])
@@ -283,6 +289,10 @@ def train(
 def evaluate_run(run: str | Path) -> dict[str, float]:
     root = Path(run)
     spec = load_spec(root / "spec.resolved.json")
+    if spec.mode == TrainingMode.QLORA:
+        from molt_stream.training.qlora import evaluate_qlora
+
+        return evaluate_qlora(spec, root)
     device = torch.device(spec.stream.device)
     model = SmallCausalLM(spec.model).to(device)
     state = AtomicCheckpointStore(root).load(map_location=device)
@@ -301,6 +311,10 @@ def evaluate_run(run: str | Path) -> dict[str, float]:
 def generate_run(run: str | Path, prompt: list[int], max_new_tokens: int = 32) -> list[int]:
     root = Path(run)
     spec = load_spec(root / "spec.resolved.json")
+    if spec.mode == TrainingMode.QLORA:
+        from molt_stream.training.qlora import generate_qlora
+
+        return generate_qlora(spec, root, prompt, max_new_tokens)
     device = torch.device(spec.stream.device)
     model = SmallCausalLM(spec.model).to(device)
     model.load_state_dict(AtomicCheckpointStore(root).load(map_location=device)["model"])

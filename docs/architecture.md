@@ -1,160 +1,87 @@
-# Architecture proposal
+# MOLT architecture
 
-## Design goal
+Status: active architecture for package version 0.2.x.
 
-One training engine should execute stable baselines and isolated methods without
-duplicating loops. Experimental code may depend on stable contracts; stable
-code must never import a method implementation.
+## Design goals
 
-## Proposed repository boundaries
+MOLT is an evidence-first local training engine. Stable domain types point
+inward, hardware behavior is explicit, experiment outputs are immutable
+artifacts, and optional acceleration must never silently fall back to a
+different workload.
 
-```text
-src/ai_local/
-  core/          immutable IDs, configs, events, errors, domain types
-  backends/      PyTorch/CPU/CUDA adapters and capability discovery
-  training/      one engine, optimizer/precision/checkpoint orchestration
-  data/          manifests, preparation, integrity, deterministic sampling
-  methods/       experimental policies implementing stable hooks
-  scheduling/    placement, resource limits, offload contracts
-  measurement/   phase clocks, samplers, energy integration, metric schemas
-  experiments/   spec validation, run lifecycle, artifact store, registry
-  evaluation/    aggregate quality and comparison statistics
-tests/           unit, integration, determinism, failure, and regression tests
-benchmarks/      versioned benchmark specs; no ad-hoc result selection
-configs/         immutable, versioned experiment configurations
-docs/            scope, decisions, methodology, results, and negative results
-scripts/         thin operational wrappers only
-artifacts/       ignored run outputs, content-addressed where practical
-```
-
-The import direction is inward toward `core`. `core` imports no project package.
-`measurement`, `data`, `training`, and `scheduling` consume core types;
-`backends` implements core protocols; `methods` implements hook protocols;
-`experiments` composes them. The CLI calls `experiments` and contains no training
-logic.
-
-## Stable contracts
-
-Keep the initial public surface small:
-
-- `ExperimentSpec`: fully validated immutable configuration plus schema version.
-- `RunId` / `ExperimentId`: non-semantic identifiers; reruns never overwrite.
-- `Backend`: capabilities, synchronization, memory reset/read, RNG capture/restore.
-- `Trainable`: forward/loss, state serialization, exact parameter accounting.
-- `TrainingMethod`: explicit hooks around backward/update with declared state and
-  compatibility; baseline is a no-op method.
-- `SamplerState`: dataset revision, permutation algorithm/version, epoch, cursor.
-- `CheckpointBundle`: model, optimizer, scaler, scheduler, RNG, sampler, method,
-  step/token counters, hashes, and atomic completion marker.
-- `MetricSink`: append-only typed events; measurement failure cannot be hidden.
-- `Evaluator`: token-weighted metric aggregation over an immutable manifest.
-
-Experimental methods receive a narrow `StepContext`; they do not own the data
-loader, main loop, checkpoint format, or evaluator. Unsupported capability
-combinations fail validation before allocation.
-
-## Run lifecycle
-
-1. Parse and schema-validate config; resolve every floating reference.
-2. Inspect capabilities and reject unsupported/unsafe combinations.
-3. Materialize a run directory and immutable resolved spec.
-4. Verify dataset/artifact hashes and acquire an exclusive run lock.
-5. Seed backend and construct model, method, optimizer, evaluator, and telemetry.
-6. Warm up without advancing training state; reset measurement peaks.
-7. Execute the single engine, emitting phase and step events.
-8. Save checkpoints through write-temporary → flush → hash → atomic rename →
-   completion-marker; retain prior valid checkpoint until success.
-9. Evaluate, finalize checksums, and mark the run success/failure/interrupted.
-10. Compare only compatible manifests and generate machine-readable plus human
-    reports from raw artifacts.
-
-No hidden fallbacks: CPU substitution, smaller batches, changed precision,
-disabled determinism, skipped records, telemetry loss, and checkpoint recovery
-are explicit events or hard failures according to the spec.
-
-## Saturating data path
-
-Prepared corpora are written in bounded chunks and training splits are opened
-through OS-backed memory maps. Batch windows are gathered as byte tensors, sent
-to CUDA compactly, and widened to integer token IDs on-device. This bounds RAM
-use independently of corpus size; storage/page-cache bandwidth remains a
-measured constraint.
-
-`ai-local tune` runs isolated context/micro-batch candidates, catches only CUDA
-out-of-memory failures, records peak allocation/reservation and loader enqueue
-share, and rejects candidates below a declared VRAM headroom. It never changes a
-training configuration automatically. The selected shape must pass a separate
-equal-quality experiment before promotion.
-
-## Artifact layout
+## Package map
 
 ```text
-artifacts/runs/<run-id>/
-  spec.resolved.json
-  environment.json
-  status.json
-  events.jsonl
-  metrics.summary.json
-  data.manifest.json
-  checkpoints/<step>/...
-  stderr.log
-  report.json
+src/molt_stream/
+├── core/          immutable specs, progress/telemetry contracts, errors
+├── data/          deterministic mmap token windows and contiguous packing
+├── kernels/       fused operators, compiler dispatch, exact partitioned loss
+├── measurement/   NVML telemetry, thermal controllers, Pareto frontiers
+├── methods/       isolated, unpromoted research mechanisms and correctness probes
+├── streaming/     host NF4 storage and grouped LoRA layer streaming
+├── training/      pretraining, QLoRA, optimizers, benchmarks, experiments
+├── experiments/   digest-verified atomic checkpoints
+└── cli.py         the sole `molt` command-line interface
 ```
 
-Raw JSONL is append-only. Summaries are derived and reproducible. Every schema
-is versioned; unknown versions fail loudly. Secrets and arbitrary executable
-objects are forbidden in configs/checkpoints. Loading uses tensor/state formats
-with explicit allowlists where possible.
+The automated boundary test prevents `core` from importing outward and keeps
+data, kernels, measurement, streaming, and experiments independent of the
+training orchestration layer. Experimental `methods` also remain inward of
+training and cannot import orchestration code.
 
-## Measurement architecture
-
-A monotonic high-resolution clock defines phase spans. GPU spans synchronize at
-boundaries. Independent samplers capture process/system RAM, NVML VRAM, GPU
-power/utilization, CPU utilization, and storage I/O with timestamps and error
-status. Energy integration rejects gaps beyond a configured threshold.
-
-Framework allocator peaks and device-wide NVML memory answer different questions
-and are retained separately. Telemetry overhead is measured with an A/B no-op
-benchmark. Compilation and warm-up are never merged into steady-state training,
-though total-to-quality includes all required work for a fresh run.
-
-## Test strategy
-
-- Unit: config invariants, weighted metrics, energy integration, state machines,
-  checksums, comparison compatibility, and each algorithm against references.
-- CPU integration: overfit fixture, deterministic data order, atomic checkpoint,
-  corruption detection, exact resume, and signal interruption.
-- CUDA integration: AMP/scaler resume, memory metrics, OOM as a recorded failure,
-  telemetry gaps, and documented numerical tolerance.
-- Regression: golden schema fixtures and performance thresholds on dedicated
-  benchmark specs; never fail ordinary unit tests on noisy wall-clock limits.
-- Candidate tests: gradient/update equivalence before quality experiments.
-
-## CLI mapping
-
-The proposed package name remains `ai-local` provisionally:
+## Training path
 
 ```text
-ai-local inspect
-ai-local prepare --config CONFIG
-ai-local train --config CONFIG
-ai-local resume --run RUN_ID
-ai-local evaluate --run RUN_ID
-ai-local benchmark --config CONFIG
-ai-local tune --config CONFIG --contexts 8,16,32,64,128
-ai-local compare BASELINE_RUN CANDIDATE_RUN
-ai-local report --run RUN_ID
+JSON config -> validated TrainingSpec -> mmap batcher -> model/kernel backend
+            -> optimizer + thermal controller -> atomic checkpoint + metrics
 ```
 
-`inspect` is read-only. `prepare` never starts training. `resume` never mutates a
-completed run and refuses incompatible environment/config changes unless an
-explicit migration creates a new run.
+Configuration is parsed once and rejects unknown fields. CUDA requests fail
+when CUDA is unavailable. Compiled execution is selected explicitly; MOLT does
+not substitute eager execution after a compiler failure. Input token order,
+batch geometry, seeds, and optimizer state are persisted for reproducibility.
 
-## Deferred decisions
+## Storage and recovery
 
-- SQL vs file registry: begin with append-only files and atomic indexes; revisit
-  only after concurrent-machine requirements exist.
-- Configuration format: JSON is sufficient for machine records; human configs
-  may use YAML only if strict schema validation and dependency cost are justified.
-- Frameworks beyond PyTorch, distributed execution, NPU, custom kernels, and UI
-  dashboards wait behind measured needs.
+`MMapTokenBatcher` maps token files without copying the corpus into process RAM.
+Its cursor and RNG state are checkpointed. `AtomicCheckpointStore` writes a
+temporary checkpoint, flushes it, calculates SHA-256, atomically replaces the
+active checkpoint, and retains one verified previous generation. Loading accepts
+only a data/manifest pair whose length and digest match.
+
+## Hardware-specific execution
+
+- Full-update SLM training uses eager or an explicitly requested PyTorch compile
+  backend and fused CUDA AdamW when CUDA is selected.
+- QLoRA requires its declared optional libraries and fails clearly when they are
+  absent.
+- Streamed LoRA keeps frozen NF4 payloads on the host, groups transfers into
+  configurable layer bundles, and keeps adapters on the compute device.
+- CUDA graphs are rejected for the current host-restreaming backward because
+  graphed callables require stable tensor addresses.
+- NVML sampling measures board power, temperature, utilization, memory, enforced
+  power limits, and clock-event reasons. Power-limit mutation is opt-in only.
+
+## Experiment boundary
+
+Production mechanisms live outside research selection logic. Benchmarks and
+paired experiments emit machine-readable artifacts under `artifacts/`; measured
+negative results remain valid project outputs. A method is promoted only after
+its pre-registered quality and efficiency gates survive repeated paired runs.
+
+## Public interface
+
+Run `molt --help` for the authoritative command list. Core workflows are:
+
+```powershell
+molt inspect
+molt prepare --config configs\molt-stream-smoke.json
+molt train --config configs\molt-stream-smoke.json
+molt resume --run RUN_DIRECTORY
+molt evaluate --run RUN_DIRECTORY
+molt benchmark --config configs\molt-stream-production.json
+molt report --run RUN_DIRECTORY
+```
+
+Interactive terminals render the optional UI. Redirected output and `--json`
+remain stable machine-readable JSON.

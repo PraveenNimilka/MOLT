@@ -1,3 +1,3 @@
-"""MOLT-Stream experimental local-training mechanisms."""
+"""MOLT local AI training research infrastructure."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

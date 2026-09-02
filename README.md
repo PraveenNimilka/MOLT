@@ -1,5 +1,9 @@
 # MOLT
 
+> **Release status:** `0.2.0` research alpha. The CLI, package, tests, and
+> reproducibility tooling are usable today; the project is not yet certified
+> for unattended production workloads and makes no breakthrough claim.
+
 MOLT is a local-first research platform for testing whether model training or
 adaptation can reach useful quality with less time, energy, memory, cost, or
 operational complexity on consumer hardware.
@@ -49,6 +53,7 @@ for exact gate results.
 
 ```powershell
 uv sync
+.\.venv\Scripts\molt.exe --version
 .\.venv\Scripts\molt.exe inspect
 .\.venv\Scripts\molt.exe prepare --config configs\molt-stream-smoke.json
 .\.venv\Scripts\molt.exe train --config configs\molt-stream-smoke.json
@@ -56,24 +61,32 @@ uv sync
 .\.venv\Scripts\molt.exe report --run RUN_ID
 .\.venv\Scripts\molt.exe evaluate --run RUN_ID
 .\.venv\Scripts\molt.exe generate --run RUN_ID --prompt-ids 1,2,3
+.\.venv\Scripts\molt.exe qlora-benchmark --run RUN_ID --batches 8 --split validation
 ```
 
-Other commands include `resume`, `frontier`, `stream-tune`,
-`curriculum-benchmark`, and `loss-partition-benchmark`. Token corpora are streamed
-to disk and memory-mapped during training, so corpus size is not limited by RAM.
-The `tune` command records OOM candidates and preserves a configurable VRAM
-headroom; its output is a throughput recommendation, not a quality claim.
-Commands reject missing CUDA,
-invalid configs, data hash drift, completed-run resume, and corrupted checkpoints
-rather than silently falling back.
+See [installation and CUDA runtime selection](docs/installation.md). A generic
+wheel install may select CPU PyTorch; `molt --json inspect` is authoritative and
+MOLT will not silently present a CPU environment as CUDA-ready.
 
-The former `ai_local` prototype and its tests are preserved in
-`archive/ai_local-legacy-2026-09-02.zip`. Historical documents and artifacts
-remain available as research evidence, but `ai-local` is no longer installed.
+Other commands include `resume`, `frontier`, `stream-tune`,
+`compare`, `curriculum-benchmark`, and `loss-partition-benchmark`. Token corpora are streamed
+to disk and memory-mapped during training, so corpus size is not limited by RAM.
+The `stream-tune` command compares streamed-layer configurations; its output is
+a throughput recommendation, not a quality claim.
+Commands reject missing CUDA, invalid configs, completed-run resume, and
+corrupted checkpoints rather than silently falling back. Dataset content hashes
+must be recorded by the experiment manifest; the mmap batcher itself validates
+file alignment and checkpoint path/geometry, not corpus content.
+
+The former `ai_local` implementation is no longer part of the active package or
+test suite. It remains recoverable from the repository's initial Git history;
+historical documents and artifacts are retained as research evidence, but the
+`ai-local` command is no longer installed.
 
 ## Start here
 
 - [Vision and scope](docs/vision-and-scope.md)
+- [Installation and CUDA runtime selection](docs/installation.md)
 - [Repository audit](docs/audits/repository-audit-2026-09-01.md)
 - [Hardware capability report](docs/audits/hardware-capability-2026-09-01.md)
 - [Prior-art matrix](docs/research/prior-art-matrix.md)
@@ -82,9 +95,13 @@ remain available as research evidence, but `ai-local` is no longer installed.
 - [Hypotheses and falsification experiments](docs/research/hypotheses.md)
 - [2× efficiency research program and measured memory experiment](docs/research/efficiency-2x-program.md)
 - [Rejected coupled-suffix telescoping method: mathematics and ablations](docs/research/coupled-suffix-telescoping.md)
+- [Exact counterfactual-rate probe: correctness and rejection](docs/research/counterfactual-rate-probe.md)
 - [Evidence-gated roadmap](docs/roadmap.md)
 - [1B feasibility analysis](docs/research/one-billion-feasibility.md)
 - [Prototype results](docs/results/2026-09-01-prototype.md)
+- [Qwen2 0.5B local QLoRA validation](docs/results/2026-09-02-qwen2-0.5b-qlora.md)
+- [Qwen2 LoRA+ frozen-holdout result](docs/results/2026-09-02-qwen2-loraplus-holdout.md)
+- [Commercial-readiness scorecard](docs/commercial-readiness-scorecard.md)
 - [Reproduction guide](docs/reproduction.md)
 - [Machine-readable experiment registry](experiments/registry.json)
 
@@ -100,6 +117,12 @@ Documents use four labels:
 The project does not use “novel,” “breakthrough,” or comparative superiority
 without a completed prior-art review, controlled experiments, multiple seeds,
 raw artifacts, and reproducible statistical evidence.
+
+The strongest current Qwen result is a frozen three-seed holdout comparison of
+early-stopped LoRA+ against vanilla QLoRA: median total time improved 37.17% and
+GPU-board energy improved 48.76%, with every final NLL within 1%, unchanged peak
+allocation, and no abort. LoRA+ is established prior art, so this is a validated
+MOLT integration/baseline result—not a new algorithm or commercial moat.
 
 The latest real-text milestone is [MOLT AI 50M](docs/results/2026-09-01-molt-ai-50m.md):
 a 49.88M-parameter ByteLevel-BPE model trained for two full TinyStories epochs

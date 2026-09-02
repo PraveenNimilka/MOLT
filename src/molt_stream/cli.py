@@ -3,16 +3,24 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from molt_stream import __version__
 from molt_stream.core.contracts import ProgressEvent
 from molt_stream.core.errors import MoltStreamError
 from molt_stream.training.stream_benchmark import inspect_capabilities, stream_tune
 from molt_stream.training.engine import evaluate_run, generate_run, load_spec, train
 from molt_stream.training.throughput import fusion_memory_benchmark, training_throughput_benchmark
 from molt_stream.training.loss_partition import benchmark_exact_loss_partitioning
+from molt_stream.training.qlora import benchmark_qlora_adapter
 from molt_stream.measurement.frontier import QualityEnergyPoint, frontier_dict
+from molt_stream.measurement.comparison import (
+    aggregate_comparisons,
+    compare_runs,
+    write_comparison,
+)
 from molt_stream.measurement.telemetry import manage_power_limit
 from molt_stream.training.curriculum import run_curriculum_experiment
 
@@ -192,6 +200,12 @@ def _report_rows(value: dict[str, Any], run: str | Path) -> list[tuple[str, obje
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="molt", description="MOLT local training research engine")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Print the installed MOLT version and exit",
+    )
     presentation = parser.add_mutually_exclusive_group()
     presentation.add_argument("--json", action="store_true", help="Force machine-readable JSON output")
     presentation.add_argument("--ui", action="store_true", help="Force the interactive terminal UI")
@@ -202,6 +216,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--config", required=True)
     training = commands.add_parser("train", help="Run from-scratch SLM pretraining")
     training.add_argument("--config", required=True)
+    training.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the configured seed; the resolved run spec records the value",
+    )
     training.add_argument("--galore", action="store_true")
     resume = commands.add_parser("resume", help="Resume an interrupted run exactly")
     resume.add_argument("--run", required=True)
@@ -210,6 +230,28 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--run", required=True)
     report = commands.add_parser("report", help="Print a run's machine-readable summary")
     report.add_argument("--run", required=True)
+    comparison = commands.add_parser(
+        "compare", help="Compare candidate and baseline end-to-end evidence gates"
+    )
+    comparison.add_argument("baseline_run")
+    comparison.add_argument("candidate_run")
+    comparison.add_argument("--quality-tolerance-percent", type=float, default=1.0)
+    comparison.add_argument("--minimum-improvement-percent", type=float, default=1.0)
+    comparison.add_argument("--thermal-peak-tolerance-c", type=float, default=1.0)
+    comparison.add_argument("--output", default=None, help="Optional atomic JSON artifact path")
+    paired = commands.add_parser(
+        "compare-paired", help="Aggregate paired comparisons with bootstrap intervals"
+    )
+    paired.add_argument(
+        "--pair", action="append", nargs=2, required=True,
+        metavar=("BASELINE_RUN", "CANDIDATE_RUN"),
+    )
+    paired.add_argument("--quality-tolerance-percent", type=float, default=1.0)
+    paired.add_argument("--minimum-improvement-percent", type=float, default=1.0)
+    paired.add_argument("--thermal-peak-tolerance-c", type=float, default=1.0)
+    paired.add_argument("--bootstrap-samples", type=int, default=10_000)
+    paired.add_argument("--bootstrap-seed", type=int, default=20260902)
+    paired.add_argument("--output", default=None, help="Optional atomic JSON artifact path")
     frontier = commands.add_parser("frontier", help="Build a time/board-energy/perplexity frontier")
     frontier.add_argument("runs", nargs="+")
     generate = commands.add_parser("generate", help="Generate greedy token IDs")
@@ -254,6 +296,13 @@ def build_parser() -> argparse.ArgumentParser:
     power = commands.add_parser("power-limit", help="Query or explicitly request an NVML power limit")
     power.add_argument("--watts", type=float, default=65.0)
     power.add_argument("--apply", action="store_true", help="Request the hardware change; may require administrator rights")
+    qlora_benchmark = commands.add_parser(
+        "qlora-benchmark",
+        help="Compare a saved QLoRA adapter with its unchanged local base model",
+    )
+    qlora_benchmark.add_argument("--run", required=True)
+    qlora_benchmark.add_argument("--batches", type=int, default=8)
+    qlora_benchmark.add_argument("--split", choices=("train", "validation"), default="validation")
     return parser
 
 
@@ -289,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
             output(value, title="Dataset info", rows=[("State", "ready"), ("Path", value["path"]), ("Size", _bytes(value["bytes"])), ("Backend", "OS mmap")])
         elif args.command == "train":
             spec = load_spec(args.config)
+            if args.seed is not None:
+                spec = replace(spec, seed=args.seed)
             if ui.enabled:
                 ui.card("Training info", [
                     ("State", "running"), ("Model", f"{spec.model.layers}L × {spec.model.width}D"),
@@ -315,6 +366,36 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "report":
             value = json.loads((Path(args.run) / "metrics.summary.json").read_text("utf-8"))
             output(value, title="Training report", rows=_report_rows(value, args.run))
+        elif args.command == "compare":
+            value = compare_runs(
+                args.baseline_run,
+                args.candidate_run,
+                quality_tolerance_percent=args.quality_tolerance_percent,
+                minimum_improvement_percent=args.minimum_improvement_percent,
+                thermal_peak_tolerance_c=args.thermal_peak_tolerance_c,
+            )
+            if args.output is not None:
+                value["artifact_path"] = str(write_comparison(args.output, value))
+            output(value, title="Run comparison")
+        elif args.command == "compare-paired":
+            comparisons = [
+                compare_runs(
+                    baseline,
+                    candidate,
+                    quality_tolerance_percent=args.quality_tolerance_percent,
+                    minimum_improvement_percent=args.minimum_improvement_percent,
+                    thermal_peak_tolerance_c=args.thermal_peak_tolerance_c,
+                )
+                for baseline, candidate in args.pair
+            ]
+            value = aggregate_comparisons(
+                comparisons,
+                bootstrap_samples=args.bootstrap_samples,
+                bootstrap_seed=args.bootstrap_seed,
+            )
+            if args.output is not None:
+                value["artifact_path"] = str(write_comparison(args.output, value))
+            output(value, title="Paired comparison")
         elif args.command == "frontier":
             points = []
             signature = None
@@ -387,6 +468,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "power-limit":
             output(manage_power_limit(args.watts, apply=args.apply), title="GPU power limit")
+        elif args.command == "qlora-benchmark":
+            root = Path(args.run)
+            value = benchmark_qlora_adapter(
+                load_spec(root / "spec.resolved.json"),
+                root,
+                batches=args.batches,
+                split=args.split,
+            )
+            output(value, title="QLoRA benchmark")
         return 0
     except (MoltStreamError, FileNotFoundError, ValueError, RuntimeError) as exc:
         ui.finish_progress()

@@ -1,5 +1,16 @@
-from molt_stream.cli import TerminalUI
+import pytest
+
+from molt_stream import __version__
+from molt_stream.cli import TerminalUI, build_parser
 from molt_stream.core.contracts import ProgressEvent
+
+
+def test_cli_reports_package_version(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(["--version"])
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"molt {__version__}"
 
 
 def test_card_uses_rounded_border_and_status_badge(capsys):

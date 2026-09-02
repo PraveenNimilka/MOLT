@@ -10,6 +10,7 @@ def test_molt_stream_imports_follow_inward_boundaries():
         "kernels": 1,
         "measurement": 1,
         "experiments": 1,
+        "methods": 1,
         "streaming": 2,
         "training": 3,
         "cli": 4,

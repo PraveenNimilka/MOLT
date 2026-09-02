@@ -47,7 +47,8 @@ Primary sources:
 
 ## Memory bound and selected mechanism baseline
 
-`configs/one-billion-mechanism.json` defines a real dense model:
+The historical `configs/one-billion-mechanism.json` (recoverable from the initial
+Git commit) defined a real dense model:
 
 - 20 Transformer layers, width 2,048, 16 heads, MLP ratio 4;
 - byte vocabulary and context length 8;

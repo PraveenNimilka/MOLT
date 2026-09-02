@@ -1,8 +1,8 @@
 {
   "mode": "pretrain",
   "data": {
-    "path": "D:/Projects/MOLT AI/50M/data/tinystories-bpe8192/train.bin",
-    "validation_path": "D:/Projects/MOLT AI/50M/data/tinystories-bpe8192/validation.bin",
+    "path": "${MOLT_DATA_ROOT}/50M/data/tinystories-bpe8192/train.bin",
+    "validation_path": "${MOLT_DATA_ROOT}/50M/data/tinystories-bpe8192/validation.bin",
     "context_length": 512,
     "storage_dtype": "int32",
     "sequential": true,
