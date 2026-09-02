@@ -41,3 +41,4 @@ class ProgressEvent:
     gpu_temperature_c: float | None = None
     thermal_state: str = "full-speed"
     thermal_pause_seconds: float = 0.0
+    initial_step: int = 0

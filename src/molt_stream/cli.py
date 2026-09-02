@@ -117,9 +117,10 @@ class TerminalUI:
         width = 20
         filled = round(width * fraction)
         bar = self._style("█" * filled, self.GREEN) + self._style("░" * (width - filled), self.MUTED)
+        session_steps = max(1, event.step - event.initial_step)
         eta = (
-            event.elapsed_seconds / event.step * (event.total_steps - event.step)
-            if event.step else 0.0
+            event.elapsed_seconds / session_steps * (event.total_steps - event.step)
+            if session_steps else 0.0
         )
         speed = f"{event.tokens_per_second:,.0f} tok/s" if event.tokens_per_second is not None else "— tok/s"
         loss = f"loss {event.loss:.4f}" if event.loss is not None else "loss —"

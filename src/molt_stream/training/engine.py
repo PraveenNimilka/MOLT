@@ -131,12 +131,16 @@ def train(
     )
     validation_batcher = MMapTokenBatcher(validation_spec, seed=spec.seed + 1, device=device)
     step = tokens = 0
+    initial_tokens = 0
+    initial_step = 0
     if resume_state is not None:
         state = resume_state
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         batcher.load_state_dict(state["batcher"])
         step, tokens = int(state["step"]), int(state["tokens"])
+        initial_tokens = tokens
+        initial_step = step
         random.setstate(state["python_rng"])
         torch.set_rng_state(state["torch_rng"])
         if device.type == "cuda":
@@ -221,8 +225,10 @@ def train(
                         total_steps=spec.max_steps,
                         gpu_temperature_c=post_pause_temperature,
                         thermal_state="thermal-abort",
+                        initial_step=initial_step,
                     ))
                 break
+        session_tokens = tokens - initial_tokens
         if progress:
             elapsed = time.perf_counter() - training_started
             progress(ProgressEvent(
@@ -230,12 +236,13 @@ def train(
                 step=step,
                 total_steps=spec.max_steps,
                 elapsed_seconds=elapsed,
-                tokens_per_second=tokens / elapsed if elapsed else None,
+                tokens_per_second=session_tokens / elapsed if elapsed else None,
                 loss=loss_sum,
                 vram_bytes=(torch.cuda.memory_allocated() if device.type == "cuda" else None),
                 gpu_temperature_c=temperature,
                 thermal_state=thermal_state,
                 thermal_pause_seconds=pause,
+                initial_step=initial_step,
             ))
         if step == spec.max_steps or step % max(1, spec.max_steps // 4) == 0:
             nll = _evaluate(model, validation_batcher)
@@ -251,14 +258,16 @@ def train(
     checkpoint_path = store.save(state)
     measured = telemetry.stop()
     seconds = time.perf_counter() - total_started
+    session_tokens = tokens - initial_tokens
     summary = {
         "state": "thermal_abort" if thermal_abort else "completed",
         "thermal_abort": thermal_abort, "mode": spec.mode, "step": step, "tokens": tokens,
+        "session_tokens": session_tokens,
         "seconds": seconds, "training_loop_seconds": training_seconds,
-        "tokens_per_second": tokens / seconds,
-        "training_loop_tokens_per_second": tokens / training_seconds if training_seconds else None,
+        "tokens_per_second": session_tokens / seconds if seconds else 0.0,
+        "training_loop_tokens_per_second": session_tokens / training_seconds if training_seconds else None,
         "training_loop_compute_tokens_per_second": (
-            tokens / (training_seconds - thermal_pause_seconds)
+            session_tokens / (training_seconds - thermal_pause_seconds)
             if training_seconds > thermal_pause_seconds else None
         ),
         "parameter_count": model.parameter_count, "evaluations": evaluations,

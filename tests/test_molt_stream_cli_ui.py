@@ -64,3 +64,19 @@ def test_ui_renders_thermal_abort_badge(capsys):
     output = capsys.readouterr().out
     assert "[ THERMAL_ABORT ]" in output
     assert "saving checkpoint" in output
+
+
+def test_progress_uses_session_steps_for_resume_eta(capsys):
+    ui = TerminalUI(enabled=True, color=False)
+    # Resumed at step 500, now at step 501 after 2.0 seconds of session time
+    # 499 steps remaining. 1 session step in 2s -> 499 * 2s = 998s = 16m 38s
+    ui.progress(ProgressEvent(
+        "step", step=501, total_steps=1000, elapsed_seconds=2.0,
+        tokens_per_second=2100.0, loss=0.5,
+        vram_bytes=2_000_000_000, gpu_temperature_c=65.0,
+        initial_step=500,
+    ))
+    ui.finish_progress()
+    output = capsys.readouterr().out
+    assert "16:38" in output  # Realistic ~16m ETA, NOT 00:01!
+

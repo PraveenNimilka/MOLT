@@ -22,6 +22,7 @@ from molt_stream.experiments.store import AtomicCheckpointStore, sha256
 from molt_stream.measurement.telemetry import NVMLTelemetry, integrate_board_energy
 from molt_stream.measurement.thermal import (
     build_thermal_controller,
+    duty_cycle_pause_seconds,
     latest_telemetry_point,
     latest_temperature_c,
 )
@@ -191,12 +192,16 @@ def train_qlora(
         parameter.numel() for parameter in model.parameters() if parameter.requires_grad
     )
     step = tokens = 0
+    initial_tokens = 0
+    initial_step = 0
     if resume_state is not None:
         state = resume_state
         set_peft_model_state_dict(model, state["adapters"])
         optimizer.load_state_dict(state["optimizer"])
         batcher.load_state_dict(state["batcher"])
         step, tokens = int(state["step"]), int(state["tokens"])
+        initial_tokens = tokens
+        initial_step = step
         random.setstate(state["python_rng"])
         torch.set_rng_state(state["torch_rng"])
         torch.cuda.set_rng_state_all(state["cuda_rng"])
@@ -235,24 +240,35 @@ def train_qlora(
     while step < spec.max_steps:
         step_started = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
+        loss_sum = 0.0
         for _ in range(spec.gradient_accumulation):
             x, y = batcher.batch(spec.batch_size)
-            loss = _shifted_causal_loss(model, x, y) / spec.gradient_accumulation
-            loss.backward()
+            micro_loss = _shifted_causal_loss(model, x, y) / spec.gradient_accumulation
+            micro_loss.backward()
+            loss_sum += float(micro_loss.detach())
             tokens += y.numel()
         optimizer.step()
         torch.cuda.synchronize()
         update_compute_seconds += time.perf_counter() - step_started
         step += 1
-        decision = regulator.update(
-            latest_telemetry_point(telemetry.points),
-            step_seconds=max(time.perf_counter() - step_started, 1e-6),
-        ) if regulator is not None else None
         temperature = latest_temperature_c(telemetry.points)
-        pause = decision.pause_seconds if decision is not None else 0.0
-        thermal_abort = bool(decision.abort) if decision is not None else bool(
-            temperature is not None and temperature >= spec.thermal_abort_c
-        )
+        if regulator is not None:
+            decision = regulator.update(
+                latest_telemetry_point(telemetry.points),
+                step_seconds=max(time.perf_counter() - step_started, 1e-6),
+            )
+            pause = decision.pause_seconds
+            thermal_abort = decision.abort
+            thermal_state = decision.phase
+        else:
+            thermal_abort = bool(temperature is not None and temperature >= spec.thermal_abort_c)
+            pause = duty_cycle_pause_seconds(
+                temperature,
+                target_c=spec.thermal_target_c,
+                abort_c=spec.thermal_abort_c,
+                nominal_seconds=spec.thermal_pause_seconds,
+            )
+            thermal_state = "cooling" if pause > 0 else "full-speed"
         if thermal_abort:
             if progress:
                 progress(ProgressEvent(
@@ -262,6 +278,7 @@ def train_qlora(
                     total_steps=spec.max_steps,
                     gpu_temperature_c=temperature,
                     thermal_state="thermal-abort",
+                    initial_step=initial_step,
                 ))
             thermal_abort = True
             break
@@ -279,20 +296,23 @@ def train_qlora(
                         total_steps=spec.max_steps,
                         gpu_temperature_c=temperature,
                         thermal_state="thermal-abort",
+                        initial_step=initial_step,
                     ))
                 break
+        session_tokens = tokens - initial_tokens
         if progress:
             progress(ProgressEvent(
                 "step",
                 step=step,
                 total_steps=spec.max_steps,
                 elapsed_seconds=time.perf_counter() - started,
-                tokens_per_second=tokens / max(time.perf_counter() - started, 1e-6),
-                loss=float(loss.detach()) * spec.gradient_accumulation,
+                tokens_per_second=session_tokens / max(time.perf_counter() - started, 1e-6),
+                loss=loss_sum,
                 vram_bytes=torch.cuda.memory_allocated(),
                 gpu_temperature_c=temperature,
-                thermal_state=decision.phase if decision is not None else "full-speed",
+                thermal_state=thermal_state,
                 thermal_pause_seconds=pause,
+                initial_step=initial_step,
             ))
         if step == spec.max_steps or step % evaluation_interval == 0:
             evaluation_started = time.perf_counter()
@@ -312,15 +332,17 @@ def train_qlora(
     checkpoint_seconds = time.perf_counter() - checkpoint_started
     measured = telemetry.stop()
     seconds = time.perf_counter() - started
+    session_tokens = tokens - initial_tokens
     _atomic_json(
         run / "metrics.summary.json",
         {
             "state": "thermal_abort" if thermal_abort else "completed",
             "mode": "qlora", "step": step, "tokens": tokens, "seconds": seconds,
-            "tokens_per_second": tokens / seconds, "evaluations": evaluations,
+            "session_tokens": session_tokens,
+            "tokens_per_second": session_tokens / seconds if seconds else 0.0, "evaluations": evaluations,
             "joules_per_token": (
-                float(measured["gpu_board_energy_joules"]) / tokens
-                if measured["gpu_board_energy_joules"] is not None and tokens else None
+                float(measured["gpu_board_energy_joules"]) / session_tokens
+                if measured["gpu_board_energy_joules"] is not None and session_tokens else None
             ),
             "perplexity_monotonic": all(
                 right["perplexity"] <= left["perplexity"]
@@ -332,10 +354,10 @@ def train_qlora(
             "update_compute_seconds": update_compute_seconds,
             "checkpoint_seconds": checkpoint_seconds,
             "training_loop_tokens_per_second": (
-                tokens / training_loop_seconds if training_loop_seconds else None
+                session_tokens / training_loop_seconds if training_loop_seconds else None
             ),
             "update_compute_tokens_per_second": (
-                tokens / update_compute_seconds if update_compute_seconds else None
+                session_tokens / update_compute_seconds if update_compute_seconds else None
             ),
             "base_checkpoint_parameter_count": base_checkpoint_parameter_count,
             "quantized_parameter_elements": quantized_parameter_elements,
