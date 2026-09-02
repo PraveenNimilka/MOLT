@@ -54,7 +54,7 @@ def _local_checkpoint_parameter_count(base_model: str | None) -> int | None:
                 for key in handle.keys():
                     total += math.prod(handle.get_slice(key).get_shape())
         return total or None
-    except (OSError, RuntimeError, ValueError):
+    except (ImportError, OSError, RuntimeError, ValueError):
         return None
 
 

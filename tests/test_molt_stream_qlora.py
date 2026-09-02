@@ -37,7 +37,8 @@ def test_qlora_loss_uses_mmap_targets_without_a_second_shift():
 
 
 def test_local_checkpoint_parameter_count_uses_logical_safetensor_shapes(tmp_path):
-    from safetensors.torch import save_file
+    safetensors_torch = pytest.importorskip("safetensors.torch")
+    save_file = safetensors_torch.save_file
 
     save_file({"first": torch.zeros(3, 5), "second": torch.zeros(7)}, tmp_path / "model.safetensors")
 
@@ -67,12 +68,9 @@ def test_lora_plus_ratio_is_opt_in_and_validated():
 
 
 def test_qlora_refuses_missing_optional_runtime(tmp_path, monkeypatch):
-    import importlib.util
-
-    find_spec = importlib.util.find_spec
     monkeypatch.setattr(
         "molt_stream.training.qlora.importlib.util.find_spec",
-        lambda name: None if name == "peft" else find_spec(name),
+        lambda name: None if name == "peft" else object(),
     )
     tokens = tmp_path / "tokens.bin"
     tokens.write_bytes(bytes(range(64)))
