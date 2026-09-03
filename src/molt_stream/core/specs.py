@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import asdict, dataclass, fields
@@ -280,3 +281,10 @@ class GateSpec:
     minimum_small_model_tokens_per_second: float = 35_000.0
     maximum_temperature_c: float = 72.0
     require_zero_thermal_throttle: bool = True
+
+
+def load_spec(path: str | Path) -> TrainingSpec:
+    """Load a TrainingSpec from a JSON configuration file."""
+    target = Path(path)
+    data = json.loads(target.read_text("utf-8"))
+    return TrainingSpec.from_dict(data)

@@ -12,3 +12,4 @@ artifacts/
 data/prepared/
 dist/
 *.tmp
+molt-workspace/
