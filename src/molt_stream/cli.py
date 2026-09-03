@@ -13,9 +13,15 @@ import json
 import os
 import sys
 import time
+import warnings
 from dataclasses import replace, asdict
 from pathlib import Path
 from typing import Any
+
+# Silence harmless PyTorch Windows flop_counter and re-entrant warnings
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+warnings.filterwarnings("ignore", message=".*triton not found.*")
+warnings.filterwarnings("ignore", message=".*torch.utils.checkpoint.*")
 
 from molt_stream import __version__
 from molt_stream.core.contracts import ProgressEvent
