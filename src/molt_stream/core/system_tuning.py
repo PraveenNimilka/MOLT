@@ -21,12 +21,13 @@ SUSPENDABLE_TARGETS = {
 
 
 def elevate_process_priority() -> bool:
-    """Elevate the current process to High Priority on Windows."""
+    """Elevate process priority safely on Windows without driving CPU into thermal runaway."""
     if sys.platform != "win32":
         return False
     try:
         process = psutil.Process()
-        process.nice(psutil.HIGH_PRIORITY_CLASS)
+        # Above Normal gives priority over background apps without forcing all CPU cores into maximum PL2 turbo voltage
+        process.nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
         return True
     except Exception:
         return False

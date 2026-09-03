@@ -121,6 +121,7 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
     model = prepare_model_for_kbit_training(
         model,
         use_gradient_checkpointing=spec.activation_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
     return get_peft_model(
         model,
@@ -161,6 +162,8 @@ def train_qlora(
     random.seed(spec.seed)
     torch.manual_seed(spec.seed)
     torch.cuda.manual_seed_all(spec.seed)
+    if torch.get_num_threads() > 4:
+        torch.set_num_threads(4)
     run = Path(resume) if resume else Path(spec.artifacts_dir) / (
         f"{time.strftime('%Y%m%d-%H%M%S')}-qlora-{uuid.uuid4().hex[:8]}"
     )
