@@ -452,14 +452,19 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
                     print(f"  {idx}. {m['name']} ({m['path']})")
                 print(f"  {len(models) + 1}. Enter custom path...")
                 choice = input(ui._style(f"Select a model [1-{len(models) + 1}] (default: 1): ", ui.GREEN)).strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(models):
-                    model_path = models[int(choice) - 1]["path"]
-                elif choice == str(len(models) + 1):
-                    model_path = input(ui._style("Enter model directory path: ", ui.GREEN)).strip()
-                else:
+                clean_choice = choice.strip('\'"')
+                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(models):
+                    model_path = models[int(clean_choice) - 1]["path"]
+                elif clean_choice == str(len(models) + 1):
+                    model_path = input(ui._style("Enter model directory path: ", ui.GREEN)).strip('\'"')
+                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
+                    model_path = clean_choice
+                elif not clean_choice:
                     model_path = models[0]["path"]
+                else:
+                    model_path = clean_choice
             elif not models:
-                model_path = input(ui._style("Enter base model directory path: ", ui.GREEN)).strip()
+                model_path = input(ui._style("Enter base model directory path: ", ui.GREEN)).strip('\'"')
                 if not model_path:
                     raise MoltError("No model specified. Place models in models/ or pass --model.")
 
@@ -474,14 +479,19 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
                     print(f"  {idx}. {d['name']} ({tokens_label}) [{d['path']}]")
                 print(f"  {len(datasets) + 1}. Enter custom path...")
                 choice = input(ui._style(f"Select a dataset [1-{len(datasets) + 1}] (default: 1): ", ui.GREEN)).strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(datasets):
-                    dataset_path = datasets[int(choice) - 1]["path"]
-                elif choice == str(len(datasets) + 1):
-                    dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip()
-                else:
+                clean_choice = choice.strip('\'"')
+                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(datasets):
+                    dataset_path = datasets[int(clean_choice) - 1]["path"]
+                elif clean_choice == str(len(datasets) + 1):
+                    dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
+                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
+                    dataset_path = clean_choice
+                elif not clean_choice:
                     dataset_path = datasets[0]["path"]
+                else:
+                    dataset_path = clean_choice
             elif not datasets:
-                dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip()
+                dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
                 if not dataset_path:
                     raise MoltError("No dataset specified. Place token files in datasets/ or pass --dataset.")
 
@@ -592,6 +602,14 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
         if proceed and proceed not in ("y", "yes"):
             print("[MOLT] Training cancelled by user.")
             return 0
+
+    import torch
+    if spec.stream.device == "cuda" and (not torch.cuda.is_available() or torch.cuda.device_count() == 0):
+        raise MoltError(
+            f"CUDA acceleration is required for GPU training, but this Python environment has a CPU-only build of PyTorch (torch=={torch.__version__}).\n"
+            "To enable GPU training on your NVIDIA GPU, reinstall PyTorch with CUDA:\n"
+            "pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
+        )
 
     path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
