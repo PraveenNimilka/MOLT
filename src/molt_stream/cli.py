@@ -23,6 +23,7 @@ from molt_stream.measurement.comparison import (
 )
 from molt_stream.measurement.telemetry import manage_power_limit
 from molt_stream.training.curriculum import run_curriculum_experiment
+from molt_stream.core.system_tuning import activate_prioritized_tuning
 
 
 def _print(value: Any) -> None:
@@ -127,7 +128,13 @@ class TerminalUI:
         vram = f"VRAM {event.vram_bytes / 1e9:.2f} GB" if event.vram_bytes is not None else "VRAM —"
         temp = f"GPU {event.gpu_temperature_c:.1f}°C" if event.gpu_temperature_c is not None else "GPU —°C"
         pause_ms = round(event.thermal_pause_seconds * 1000)
-        if event.thermal_state == "protective-cooling":
+        if event.thermal_state == "gear-1-sprint":
+            cooling = "[⚡ GEAR 1 ~3,000 tok/s]"
+        elif event.thermal_state == "gear-2-cooldown":
+            cooling = f"[❄ GEAR 2 ~1,800 tok/s ({pause_ms}ms)]"
+        elif event.thermal_state == "pit-stop-cooldown":
+            cooling = f"[❄ PIT STOP {event.thermal_pause_seconds:.1f}s]"
+        elif event.thermal_state == "protective-cooling":
             cooling = f"[❄ PROTECT {pause_ms}ms]"
         elif event.thermal_pause_seconds > 0:
             cooling = f"[❄ COOLING {pause_ms}ms]"
@@ -199,6 +206,27 @@ def _report_rows(value: dict[str, Any], run: str | Path) -> list[tuple[str, obje
     ]
 
 
+def _resolve_execution_mode(requested: str | None, ui: TerminalUI) -> str:
+    if requested in ("normal", "prioritize"):
+        return requested
+    if not ui.enabled or not sys.stdin.isatty():
+        return "normal"
+    ui.card(
+        "Execution Profile",
+        [
+            ("1. Normal Mode", "Standard thermal limits & background defaults"),
+            ("2. Prioritized Mode", "High CPU Priority, ~2,000 tok/s steady cruise, Defender exclusions"),
+        ],
+    )
+    try:
+        choice = input(ui._style("Select mode [1=Normal, 2=Prioritized] (default: 1): ", ui.GREEN)).strip()
+        if choice == "2":
+            return "prioritize"
+    except (EOFError, KeyboardInterrupt):
+        print()
+    return "normal"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="molt", description="MOLT local training research engine")
     parser.add_argument(
@@ -224,9 +252,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the configured seed; the resolved run spec records the value",
     )
     training.add_argument("--galore", action="store_true")
+    training.add_argument(
+        "--mode-select",
+        choices=("normal", "prioritize"),
+        default=None,
+        help="Select execution profile: normal or prioritize",
+    )
     resume = commands.add_parser("resume", help="Resume an interrupted run exactly")
     resume.add_argument("--run", required=True)
     resume.add_argument("--galore", action="store_true")
+    resume.add_argument(
+        "--mode-select",
+        choices=("normal", "prioritize"),
+        default=None,
+        help="Select execution profile: normal or prioritize",
+    )
     evaluate = commands.add_parser("evaluate", help="Evaluate a completed run")
     evaluate.add_argument("--run", required=True)
     report = commands.add_parser("report", help="Print a run's machine-readable summary")
@@ -341,6 +381,24 @@ def main(argv: list[str] | None = None) -> int:
             spec = load_spec(args.config)
             if args.seed is not None:
                 spec = replace(spec, seed=args.seed)
+            selected_mode = _resolve_execution_mode(args.mode_select, ui)
+            if selected_mode == "prioritize":
+                tuning = activate_prioritized_tuning(spec)
+                spec = tuning["tuned_spec"]
+                if ui.enabled:
+                    def_status = "Active" if any(tuning["defender_exclusions"].values()) else "Checked"
+                    bg_apps = ", ".join(tuning["background_gpu"]) if tuning["background_gpu"] else "None"
+                    suspended_count = f"{len(tuning['suspended_apps'])} apps frozen" if tuning["suspended_apps"] else "None (Clean)"
+                    ui.card("⚡ Prioritized Dual-Gear Mode", [
+                        ("State", "active"),
+                        ("Process Priority", "High" if tuning["priority_elevated"] else "Standard"),
+                        ("Gear 1 (Sprint)", "Full Speed ~3,000 tok/s (0ms pause)"),
+                        ("Gear 2 (Pit Cruise)", f"Cooling Pacing ~1,800 tok/s ({int(spec.thermal_pause_seconds*1000)}ms, >= {spec.thermal_target_c:.1f}°C)"),
+                        ("Shift-Up Recovery", f"Returns to Gear 1 when <= {spec.thermal_cruise_max_c:.1f}°C"),
+                        ("Safety Boundary", f"{spec.thermal_abort_c:.1f}°C abort limit"),
+                        ("Suspended Apps", suspended_count),
+                        ("Defender I/O", def_status),
+                    ])
             if ui.enabled:
                 ui.card("Training info", [
                     ("State", "running"), ("Model", f"{spec.model.layers}L × {spec.model.width}D"),
@@ -356,7 +414,26 @@ def main(argv: list[str] | None = None) -> int:
             output({"run": str(path)}, title=title, rows=_report_rows(summary, path))
         elif args.command == "resume":
             root = Path(args.run)
-            path = train(load_spec(root / "spec.resolved.json"), resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+            spec = load_spec(root / "spec.resolved.json")
+            selected_mode = _resolve_execution_mode(args.mode_select, ui)
+            if selected_mode == "prioritize":
+                tuning = activate_prioritized_tuning(spec)
+                spec = tuning["tuned_spec"]
+                if ui.enabled:
+                    def_status = "Active" if any(tuning["defender_exclusions"].values()) else "Checked"
+                    bg_apps = ", ".join(tuning["background_gpu"]) if tuning["background_gpu"] else "None"
+                    suspended_count = f"{len(tuning['suspended_apps'])} apps frozen" if tuning["suspended_apps"] else "None (Clean)"
+                    ui.card("⚡ Prioritized Dual-Gear Mode", [
+                        ("State", "active"),
+                        ("Process Priority", "High" if tuning["priority_elevated"] else "Standard"),
+                        ("Gear 1 (Sprint)", "Full Speed ~3,000 tok/s (0ms pause)"),
+                        ("Gear 2 (Pit Cruise)", f"Cooling Pacing ~1,800 tok/s ({int(spec.thermal_pause_seconds*1000)}ms, >= {spec.thermal_target_c:.1f}°C)"),
+                        ("Shift-Up Recovery", f"Returns to Gear 1 when <= {spec.thermal_cruise_max_c:.1f}°C"),
+                        ("Safety Boundary", f"{spec.thermal_abort_c:.1f}°C abort limit"),
+                        ("Suspended Apps", suspended_count),
+                        ("Defender I/O", def_status),
+                    ])
+            path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
             ui.finish_progress()
             summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
             title = "Training stopped" if summary.get("state") == "thermal_abort" else "Training resumed"

@@ -204,6 +204,92 @@ class SteadyDutyThermalController:
         )
 
 
+class DualGearThermalController:
+    """Automatic two-gear transmission: Sprint Gear 1 (~3,000 tok/s) and Cooldown Gear 2 (~1,800 tok/s)."""
+
+    def __init__(
+        self,
+        *,
+        shift_down_c: float = 74.0,
+        shift_up_c: float = 65.0,
+        gear1_pause_seconds: float = 0.0,
+        gear2_pause_seconds: float = 0.22,
+        abort_c: float = 85.0,
+    ) -> None:
+        if not 0 < shift_up_c < shift_down_c < abort_c:
+            raise ValueError("Thermal gears must satisfy shift_up < shift_down < abort")
+        if gear1_pause_seconds < 0 or gear2_pause_seconds < 0:
+            raise ValueError("Gear pauses must be non-negative")
+        self.shift_down_c = shift_down_c
+        self.shift_up_c = shift_up_c
+        self.gear1_pause_seconds = gear1_pause_seconds
+        self.gear2_pause_seconds = gear2_pause_seconds
+        self.abort_c = abort_c
+        self._gear = 1
+
+    def update(
+        self,
+        point: TelemetryPoint | None,
+        *,
+        step_seconds: float,
+    ) -> ThermalDecision:
+        if point is None or point.gpu_temperature_c is None:
+            pause = self.gear1_pause_seconds if self._gear == 1 else self.gear2_pause_seconds
+            phase = "gear-1-sprint" if self._gear == 1 else "gear-2-cooldown"
+            return ThermalDecision(pause, None, None, 0.0, None, False, phase)
+
+        temp = float(point.gpu_temperature_c)
+        if temp >= self.abort_c:
+            return ThermalDecision(0.0, temp, temp, 0.0, temp, True, "thermal-abort")
+
+        if self._gear == 2:
+            if temp <= self.shift_up_c:
+                self._gear = 1
+                return ThermalDecision(
+                    self.gear1_pause_seconds,
+                    temp,
+                    temp,
+                    0.0,
+                    temp,
+                    False,
+                    "gear-1-sprint",
+                )
+            return ThermalDecision(
+                self.gear2_pause_seconds,
+                temp,
+                temp,
+                0.0,
+                temp,
+                False,
+                "gear-2-cooldown",
+            )
+
+        if temp >= self.shift_down_c:
+            self._gear = 2
+            return ThermalDecision(
+                self.gear2_pause_seconds,
+                temp,
+                temp,
+                0.0,
+                temp,
+                False,
+                "gear-2-cooldown",
+            )
+
+        return ThermalDecision(
+            self.gear1_pause_seconds,
+            temp,
+            temp,
+            0.0,
+            temp,
+            False,
+            "gear-1-sprint",
+        )
+
+
+IntercoolerThermalController = DualGearThermalController
+
+
 class ThermalCruiseController:
     """Predictive host-side pacing for a thermally constrained training loop.
 
@@ -340,8 +426,16 @@ class ThermalCruiseController:
 
 def build_thermal_controller(
     spec: TrainingSpec,
-) -> ThermalCruiseController | ZonedThermalController | SteadyDutyThermalController | None:
+) -> ThermalCruiseController | ZonedThermalController | SteadyDutyThermalController | DualGearThermalController | None:
     """Build the explicitly configured controller without hidden fallback."""
+    if spec.thermal_control_mode in ("dual-gear", "intercooler"):
+        return DualGearThermalController(
+            shift_down_c=spec.thermal_target_c,
+            shift_up_c=spec.thermal_cruise_max_c if spec.thermal_cruise_max_c is not None else 65.0,
+            gear1_pause_seconds=0.0,
+            gear2_pause_seconds=spec.thermal_pause_seconds if spec.thermal_pause_seconds > 0 else 0.22,
+            abort_c=spec.thermal_abort_c,
+        )
     if spec.thermal_control_mode == "predictive-cruise":
         return ThermalCruiseController(
             target_c=spec.thermal_target_c,

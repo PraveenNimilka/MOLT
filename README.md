@@ -49,6 +49,23 @@ The host is not yet 8B QLoRA-ready, and double buffering was slower than its
 synchronous control. See [the research record](docs/research/molt-stream-core.md)
 for exact gate results.
 
+## Closed-Loop Thermal Architecture: Dual-Gear Cadence
+
+MOLT is a hardware-aware LLM fine-tuning runtime that uses closed-loop GPU telemetry, thermal-aware workload pacing, memory-mapped data streaming, and fault-tolerant checkpointing to sustain long-running QLoRA workloads on thermally constrained consumer GPUs.
+
+On mobile and laptop architectures where cooling capacity is physically constrained, continuous unconstrained compute saturates thermal dissipation paths. MOLT transforms training into a feedback-controlled workload:
+
+* **Closed-Loop NVML Telemetry (~9 Hz):** Continuous ~111ms hardware sampling of temperature, power, clock throttling reasons, and board energy.
+* **Dual-Gear Cadence Controller:**
+  - **Gear 1 (Sprint):** Operates at full throttle (0ms pause) when $T_{\text{GPU}} < 74.0^\circ\text{C}$.
+  - **Gear 2 (Thermal Pacing):** Shifts to a 220ms duty-cycle interval when $T_{\text{GPU}} \ge 74.0^\circ\text{C}$, reducing average GPU board power to ~47W to match sustained dissipation capacity without interrupting training.
+  - **Automatic Shift-Up:** Returns to Gear 1 when temperature cools to $\le 65.0^\circ\text{C}$.
+  - **Emergency Abort Boundary:** Software safety boundary at $85.0^\circ\text{C}$.
+* **Environment Optimization (`--mode-select prioritize`):**
+  - Windows thread priority elevation to `HIGH_PRIORITY_CLASS`.
+  - Windows Defender exclusion hooks to prevent real-time scan contention on memory-mapped token streams.
+  - Safe background process suspension (`psutil.Process.suspend()`) for non-critical GPU competitors (`Discord.exe`, `Spotify.exe`, `Steam.exe`), with guaranteed resumption via `atexit` handlers upon completion or interruption.
+
 ## Quick start
 
 ```powershell

@@ -155,14 +155,17 @@ class TrainingSpec:
             )
         if not (0 < self.thermal_target_c < self.thermal_abort_c):
             raise ValueError("thermal_target_c must be positive and below thermal_abort_c")
-        if not 0.03 <= self.thermal_pause_seconds <= 0.05:
+        if self.thermal_control_mode in ("dual-gear", "intercooler"):
+            if not 0.05 <= self.thermal_pause_seconds <= 30.0:
+                raise ValueError("dual-gear thermal_pause_seconds must be between 0.05 and 30.0")
+        elif not 0.03 <= self.thermal_pause_seconds <= 0.05:
             raise ValueError("thermal_pause_seconds must be between 0.03 and 0.05")
         if self.thermal_control_mode not in {
-            "reactive", "predictive-cruise", "zone-cruise", "steady-duty"
+            "reactive", "predictive-cruise", "zone-cruise", "steady-duty", "intercooler", "dual-gear"
         }:
             raise ValueError(
                 "thermal_control_mode must be reactive, predictive-cruise, zone-cruise, "
-                "or steady-duty"
+                "steady-duty, intercooler, or dual-gear"
             )
         if self.thermal_lookahead_seconds <= 0:
             raise ValueError("thermal_lookahead_seconds must be positive")
