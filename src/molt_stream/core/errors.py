@@ -8,3 +8,6 @@ class CapabilityError(MoltStreamError):
 
 class IntegrityError(MoltStreamError):
     """Persistent state failed an integrity invariant."""
+
+
+MoltError = MoltStreamError
