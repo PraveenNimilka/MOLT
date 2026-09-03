@@ -44,6 +44,10 @@ class TerminalUI:
     MUTED = "\x1b[38;2;107;114;128m"
     WHITE = "\x1b[38;2;245;245;245m"
     BLACK = "\x1b[38;2;0;0;0m"
+    RED = "\x1b[38;2;239;68;68m"
+    YELLOW = "\x1b[38;2;234;179;8m"
+    CYAN = "\x1b[38;2;6;182;212m"
+    BOLD = "\x1b[1m"
     GREEN_BG = "\x1b[48;2;34;197;94m"
     BLACK_BG = "\x1b[48;2;0;0;0m"
     RESET = "\x1b[0m"
@@ -448,14 +452,19 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
                     print(f"  {idx}. {m['name']} ({m['path']})")
                 print(f"  {len(models) + 1}. Enter custom path...")
                 choice = input(ui._style(f"Select a model [1-{len(models) + 1}] (default: 1): ", ui.GREEN)).strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(models):
-                    model_path = models[int(choice) - 1]["path"]
-                elif choice == str(len(models) + 1):
-                    model_path = input(ui._style("Enter model directory path: ", ui.GREEN)).strip()
-                else:
+                clean_choice = choice.strip('\'"')
+                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(models):
+                    model_path = models[int(clean_choice) - 1]["path"]
+                elif clean_choice == str(len(models) + 1):
+                    model_path = input(ui._style("Enter model directory path: ", ui.GREEN)).strip('\'"')
+                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
+                    model_path = clean_choice
+                elif not clean_choice:
                     model_path = models[0]["path"]
+                else:
+                    model_path = clean_choice
             elif not models:
-                model_path = input(ui._style("Enter base model directory path: ", ui.GREEN)).strip()
+                model_path = input(ui._style("Enter base model directory path: ", ui.GREEN)).strip('\'"')
                 if not model_path:
                     raise MoltError("No model specified. Place models in models/ or pass --model.")
 
@@ -470,14 +479,19 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
                     print(f"  {idx}. {d['name']} ({tokens_label}) [{d['path']}]")
                 print(f"  {len(datasets) + 1}. Enter custom path...")
                 choice = input(ui._style(f"Select a dataset [1-{len(datasets) + 1}] (default: 1): ", ui.GREEN)).strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(datasets):
-                    dataset_path = datasets[int(choice) - 1]["path"]
-                elif choice == str(len(datasets) + 1):
-                    dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip()
-                else:
+                clean_choice = choice.strip('\'"')
+                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(datasets):
+                    dataset_path = datasets[int(clean_choice) - 1]["path"]
+                elif clean_choice == str(len(datasets) + 1):
+                    dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
+                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
+                    dataset_path = clean_choice
+                elif not clean_choice:
                     dataset_path = datasets[0]["path"]
+                else:
+                    dataset_path = clean_choice
             elif not datasets:
-                dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip()
+                dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
                 if not dataset_path:
                     raise MoltError("No dataset specified. Place token files in datasets/ or pass --dataset.")
 
@@ -583,11 +597,50 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             _print({"status": "dry_run_success", "spec": spec.to_dict()})
         return 0
 
+def _verify_cuda_or_prompt_install(ui: TerminalUI, device: str) -> bool:
+    """Ensure CUDA is available if requested, offering automatic installation if running CPU PyTorch."""
+    if device != "cuda":
+        return True
+    import torch
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        return True
+
+    hw = get_hardware_info()
+    if ui.enabled and sys.stdin.isatty():
+        ui.card("⚠️ CUDA Acceleration Required", [
+            ("NVIDIA GPU", hw.get("gpu_name") or "Discrete GPU detected"),
+            ("Installed PyTorch", f"torch {torch.__version__} (CPU-only)"),
+            ("Cause", "Standard Windows pip installs CPU-only PyTorch by default"),
+            ("Fix", "Install PyTorch with NVIDIA CUDA 12.8 wheel"),
+        ])
+        try:
+            choice = input(ui._style("\nWould you like MOLT to install CUDA PyTorch now? [Y/n]: ", ui.GREEN)).strip().lower()
+            if choice in ("", "y", "yes"):
+                print("[MOLT] Installing CUDA-accelerated PyTorch... (downloading official PyTorch cu128 wheel)")
+                import subprocess
+                cmd = [sys.executable, "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cu128", "--force-reinstall"]
+                res = subprocess.run(cmd)
+                if res.returncode == 0:
+                    ui.check("CUDA PyTorch installed successfully! Please re-run: molt")
+                    return False
+        except (EOFError, KeyboardInterrupt):
+            print()
+
+    raise MoltError(
+        f"CUDA acceleration is required for GPU training, but this Python environment has a CPU-only build of PyTorch (torch=={torch.__version__}).\n"
+        "To enable GPU training on your NVIDIA GPU, run:\n"
+        "pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
+    )
+
+
     if not args.yes and ui.enabled and sys.stdin.isatty():
         proceed = input(ui._style("\nReady to begin training? [Y/n]: ", ui.GREEN)).strip().lower()
         if proceed and proceed not in ("y", "yes"):
             print("[MOLT] Training cancelled by user.")
             return 0
+
+    if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
+        return 0
 
     path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
@@ -631,6 +684,9 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
 
     if ui.enabled:
         ui.check(f"Resuming run from {root.name}")
+
+    if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
+        return 0
 
     path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()

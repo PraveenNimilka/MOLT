@@ -19,7 +19,7 @@ dependencies = [
   "numpy>=2.1.0",
   "nvidia-ml-py>=13.580.65",
   "psutil>=7.0.0",
-  "torch==2.8.0",
+  "torch>=2.4.0",
 ]
 
 [project.optional-dependencies]

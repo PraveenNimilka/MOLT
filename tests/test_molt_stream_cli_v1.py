@@ -110,3 +110,11 @@ def test_unsloth_strictly_excluded_from_repository_and_dependencies():
     # Verify unsloth is not imported in python runtime
     import sys
     assert "unsloth" not in sys.modules
+
+
+def test_cli_guided_landing_menu(monkeypatch):
+    from io import StringIO
+
+    monkeypatch.setattr("sys.stdin", StringIO("6\n"))
+    ret = main(["--ui"])
+    assert ret == 0

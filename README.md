@@ -15,8 +15,15 @@
 ```powershell
 git clone https://github.com/PraveenNimilka/MOLT.git
 cd MOLT
+
+# 1. Install PyTorch with NVIDIA CUDA acceleration (Windows)
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+# 2. Install MOLT
 pip install -e .
 ```
+*(Tip: If you use `uv`, simply run `uv pip install -e .` which pulls the CUDA wheel automatically).*
+
 
 ### 2. Launch Guided Training
 Simply type:
