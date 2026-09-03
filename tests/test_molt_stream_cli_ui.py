@@ -39,7 +39,7 @@ def test_progress_has_slim_bar_and_live_metrics(capsys):
     assert "155,000 tok/s" in output
     assert "loss 2.5000" in output
     assert "GPU 59.0°C" in output
-    assert "[⚡ FULL SPEED]" in output
+    assert "[Normal]" in output
 
 
 def test_progress_shows_live_cooling_pause(capsys):
@@ -52,7 +52,7 @@ def test_progress_shows_live_cooling_pause(capsys):
     ))
     ui.finish_progress()
     output = capsys.readouterr().out
-    assert "[❄ COOLING 15ms]" in output
+    assert "[Pause: 15ms]" in output
 
 
 def test_ui_renders_thermal_abort_badge(capsys):

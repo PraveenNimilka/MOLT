@@ -148,20 +148,20 @@ class TerminalUI:
         temp = f"GPU {event.gpu_temperature_c:.1f}°C" if event.gpu_temperature_c is not None else "GPU —°C"
         pause_ms = round(event.thermal_pause_seconds * 1000)
         if event.thermal_state == "gear-1-sprint":
-            cooling = "[⚡ GEAR 1 ~3,000 tok/s]"
+            cooling = "[Gear 1]"
         elif event.thermal_state == "gear-2-cooldown":
-            cooling = f"[❄ GEAR 2 ~1,800 tok/s ({pause_ms}ms)]"
+            cooling = f"[Gear 2: {pause_ms}ms pause]"
         elif event.thermal_state == "pit-stop-cooldown":
-            cooling = f"[❄ PIT STOP {event.thermal_pause_seconds:.1f}s]"
+            cooling = f"[Thermal Pause: {event.thermal_pause_seconds:.1f}s]"
         elif event.thermal_state == "protective-cooling":
-            cooling = f"[❄ PROTECT {pause_ms}ms]"
+            cooling = f"[Thermal Pause: {pause_ms}ms]"
         elif event.thermal_pause_seconds > 0:
-            cooling = f"[❄ COOLING {pause_ms}ms]"
+            cooling = f"[Pause: {pause_ms}ms]"
         else:
-            cooling = "[⚡ FULL SPEED]"
+            cooling = "[Normal]"
         line = (
             f"{bar} {fraction * 100:5.1f}%  ETA {_duration(eta)}  {speed}  "
-            f"{loss}  {temp} {cooling}  {vram}"
+            f"{loss}  {temp}  {cooling}  {vram}"
         )
         sys.stdout.write("\r\x1b[2K" + line)
         sys.stdout.flush()
@@ -221,10 +221,10 @@ def _resolve_execution_mode(requested: str | None, ui: TerminalUI) -> str:
     if not ui.enabled or not sys.stdin.isatty():
         return "normal"
     ui.card(
-        "Execution Profile",
+        "Execution Mode",
         [
-            ("1. Normal Mode", "Standard thermal limits & background defaults"),
-            ("2. Prioritized Mode", "High CPU Priority, Dual-Gear cruise, Defender exclusions"),
+            ("1. Normal Mode", "Standard OS priority and background defaults (Recommended)"),
+            ("2. Prioritized Mode", "Above-normal CPU priority and Windows Defender exclusions"),
         ],
     )
     try:
@@ -605,15 +605,14 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             def_status = "Active" if any(tuning["defender_exclusions"].values()) else "Checked"
             bg_apps = ", ".join(tuning["background_gpu"]) if tuning["background_gpu"] else "None"
             suspended_count = f"{len(tuning['suspended_apps'])} apps frozen" if tuning["suspended_apps"] else "None (Clean)"
-            ui.card("⚡ Prioritized Dual-Gear Mode", [
-                ("State", "active"),
-                ("Process Priority", "High" if tuning["priority_elevated"] else "Standard"),
-                ("Gear 1 (Sprint)", "Full Speed ~3,000 tok/s (0ms pause)"),
-                ("Gear 2 (Pit Cruise)", f"Cooling Pacing ({int(spec.thermal_pause_seconds*1000)}ms, >= {spec.thermal_target_c:.1f}°C)"),
-                ("Shift-Up Recovery", f"Returns to Gear 1 when <= {spec.thermal_cruise_max_c:.1f}°C"),
-                ("Safety Boundary", f"{spec.thermal_abort_c:.1f}°C abort limit"),
-                ("Suspended Apps", suspended_count),
-                ("Defender I/O", def_status),
+            ui.card("Host Tuning & Thermal Policy", [
+                ("Process Priority", "Above Normal" if tuning["priority_elevated"] else "Standard"),
+                ("Gear 1", "Unthrottled compute (0ms pause)"),
+                ("Gear 2", f"Thermal pacing ({int(spec.thermal_pause_seconds*1000)}ms at >= {spec.thermal_target_c:.1f}°C)"),
+                ("Cooldown Target", f"<= {spec.thermal_cruise_max_c:.1f}°C"),
+                ("Thermal Limit", f"{spec.thermal_abort_c:.1f}°C"),
+                ("Suspended Background", suspended_count),
+                ("Defender Exclusions", def_status),
             ])
 
     # Pre-Flight Card
@@ -772,8 +771,8 @@ def guided_landing(ui: TerminalUI) -> int:
     ui.card("MOLT AI Infrastructure", [
         ("Version", f"v{__version__} (Release Candidate)"),
         ("Hardware", f"{gpu_label} {vram_label}".strip()),
-        ("Recommended", hw["suggested_profile"]),
-        ("Pillars", "Dual-Gear Thermals • 4-bit NF4 QLoRA • Zero-RAM MMap"),
+        ("Recommended Profile", hw["suggested_profile"]),
+        ("Architecture", "Dual-Gear Thermal Control • 4-bit NF4 QLoRA • Memory-Mapped I/O"),
     ])
 
     print(ui._style("\nSelect an action:", ui.BOLD))
