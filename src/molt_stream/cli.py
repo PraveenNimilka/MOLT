@@ -597,19 +597,50 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             _print({"status": "dry_run_success", "spec": spec.to_dict()})
         return 0
 
+def _verify_cuda_or_prompt_install(ui: TerminalUI, device: str) -> bool:
+    """Ensure CUDA is available if requested, offering automatic installation if running CPU PyTorch."""
+    if device != "cuda":
+        return True
+    import torch
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        return True
+
+    hw = get_hardware_info()
+    if ui.enabled and sys.stdin.isatty():
+        ui.card("⚠️ CUDA Acceleration Required", [
+            ("NVIDIA GPU", hw.get("gpu_name") or "Discrete GPU detected"),
+            ("Installed PyTorch", f"torch {torch.__version__} (CPU-only)"),
+            ("Cause", "Standard Windows pip installs CPU-only PyTorch by default"),
+            ("Fix", "Install PyTorch with NVIDIA CUDA 12.8 wheel"),
+        ])
+        try:
+            choice = input(ui._style("\nWould you like MOLT to install CUDA PyTorch now? [Y/n]: ", ui.GREEN)).strip().lower()
+            if choice in ("", "y", "yes"):
+                print("[MOLT] Installing CUDA-accelerated PyTorch... (downloading official PyTorch cu128 wheel)")
+                import subprocess
+                cmd = [sys.executable, "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cu128", "--force-reinstall"]
+                res = subprocess.run(cmd)
+                if res.returncode == 0:
+                    ui.check("CUDA PyTorch installed successfully! Please re-run: molt")
+                    return False
+        except (EOFError, KeyboardInterrupt):
+            print()
+
+    raise MoltError(
+        f"CUDA acceleration is required for GPU training, but this Python environment has a CPU-only build of PyTorch (torch=={torch.__version__}).\n"
+        "To enable GPU training on your NVIDIA GPU, run:\n"
+        "pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
+    )
+
+
     if not args.yes and ui.enabled and sys.stdin.isatty():
         proceed = input(ui._style("\nReady to begin training? [Y/n]: ", ui.GREEN)).strip().lower()
         if proceed and proceed not in ("y", "yes"):
             print("[MOLT] Training cancelled by user.")
             return 0
 
-    import torch
-    if spec.stream.device == "cuda" and (not torch.cuda.is_available() or torch.cuda.device_count() == 0):
-        raise MoltError(
-            f"CUDA acceleration is required for GPU training, but this Python environment has a CPU-only build of PyTorch (torch=={torch.__version__}).\n"
-            "To enable GPU training on your NVIDIA GPU, reinstall PyTorch with CUDA:\n"
-            "pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
-        )
+    if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
+        return 0
 
     path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
@@ -653,6 +684,9 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
 
     if ui.enabled:
         ui.check(f"Resuming run from {root.name}")
+
+    if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
+        return 0
 
     path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
