@@ -161,9 +161,12 @@ def train_qlora(
     assert spec.base_model is not None
     random.seed(spec.seed)
     torch.manual_seed(spec.seed)
-    torch.cuda.manual_seed_all(spec.seed)
-    if torch.get_num_threads() > 4:
-        torch.set_num_threads(4)
+    if torch.get_num_threads() > 2:
+        torch.set_num_threads(2)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        pass
     run = Path(resume) if resume else Path(spec.artifacts_dir) / (
         f"{time.strftime('%Y%m%d-%H%M%S')}-qlora-{uuid.uuid4().hex[:8]}"
     )

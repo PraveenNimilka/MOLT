@@ -110,6 +110,8 @@ def train(
     )
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
+    if torch.get_num_threads() > 2:
+        torch.set_num_threads(2)
     model = SmallCausalLM(spec.model).to(device)
     training_model = prepare_execution_model(model, spec.execution_backend)
     optimizer = (
