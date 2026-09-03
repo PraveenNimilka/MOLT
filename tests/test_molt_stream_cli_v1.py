@@ -25,13 +25,18 @@ def test_hardware_discovery_returns_expected_keys():
     assert hw["suggested_memory_budget_gb"] > 0
 
 
-def test_workspace_discovery_finds_assets():
-    models = find_models()
+def test_workspace_discovery_finds_assets(tmp_path: Path):
+    models = find_models(search_roots=[tmp_path])
     assert isinstance(models, list)
-    datasets = find_datasets()
+
+    # Verify discovery finds binary token datasets
+    (tmp_path / "sample.bin").write_bytes(b"\x00" * 1024)
+    datasets = find_datasets(search_roots=[tmp_path])
     assert isinstance(datasets, list)
-    assert len(datasets) > 0  # At least smoke datasets exist in data/prepared
-    runs = find_runs()
+    assert len(datasets) == 1
+    assert datasets[0]["name"] == "sample.bin"
+
+    runs = find_runs(search_roots=[tmp_path])
     assert isinstance(runs, list)
 
 
@@ -88,6 +93,12 @@ def test_cli_config_list(capsys):
 
 
 def test_cli_benchmark_smoke_execution():
+    import torch
+
+    smoke_data = Path("data/prepared/smoke/train.bin")
+    if not torch.cuda.is_available() or torch.cuda.device_count() == 0 or not smoke_data.exists():
+        pytest.skip("CUDA device and prepared smoke dataset required for physical smoke benchmark")
+
     ret = main(["--json", "benchmark", "--smoke"])
     assert ret == 0
 
