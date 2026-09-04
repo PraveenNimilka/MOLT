@@ -110,8 +110,6 @@ def train(
     )
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
-    if torch.get_num_threads() > 2:
-        torch.set_num_threads(2)
     model = SmallCausalLM(spec.model).to(device)
     training_model = prepare_execution_model(model, spec.execution_backend)
     optimizer = (
@@ -123,7 +121,7 @@ def train(
     )
     batcher = MMapTokenBatcher(spec.data, seed=spec.seed, device=device)
     if progress:
-        progress(ProgressEvent("startup", "Zero-RAM memory-mapped dataset initialized"))
+        progress(ProgressEvent("startup", "Memory-mapped dataset initialized"))
         if spec.execution_backend == "eager":
             progress(ProgressEvent("startup", f"NVML thermal safety guard armed ({spec.thermal_target_c:.1f}°C)"))
     validation_spec = (

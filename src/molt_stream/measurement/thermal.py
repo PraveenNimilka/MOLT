@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -8,6 +9,33 @@ from molt_stream.core.contracts import TelemetryPoint
 
 if TYPE_CHECKING:
     from molt_stream.core.specs import TrainingSpec
+
+
+def cooling_pause(
+    seconds: float,
+    temperature: Callable[[], float | None],
+    *,
+    recovery_c: float,
+    abort_c: float,
+    notify: Callable[[float, float | None], None] | None = None,
+) -> float:
+    """Return actual wall pause time; UI observers never select cooling policy.
+
+    Long pauses check temperature every half second and return at recovery or
+    abort so the caller can checkpoint. Short micro-pauses retain their duration.
+    Missing telemetry never counts as recovery.
+    """
+    started = time.perf_counter()
+    remaining = max(0.0, seconds)
+    while remaining > 0:
+        time.sleep(min(0.5, remaining) if seconds >= 2.0 else remaining)
+        remaining = max(0.0, seconds - (time.perf_counter() - started))
+        current = temperature()
+        if seconds < 2.0 or (current is not None and (current <= recovery_c or current >= abort_c)):
+            break
+        if notify is not None:
+            notify(remaining, current)
+    return time.perf_counter() - started
 
 
 def latest_temperature_c(points: Sequence[TelemetryPoint]) -> float | None:
@@ -205,7 +233,7 @@ class SteadyDutyThermalController:
 
 
 class DualGearThermalController:
-    """Automatic two-gear transmission: Sprint Gear 1 (~3,000 tok/s) and Cooldown Gear 2 (~1,800 tok/s)."""
+    """Two pacing states with temperature hysteresis; throughput is workload-dependent."""
 
     def __init__(
         self,

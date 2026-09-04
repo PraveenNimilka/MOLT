@@ -22,6 +22,7 @@ from molt_stream.experiments.store import AtomicCheckpointStore, sha256
 from molt_stream.measurement.telemetry import NVMLTelemetry, integrate_board_energy
 from molt_stream.measurement.thermal import (
     build_thermal_controller,
+    cooling_pause,
     duty_cycle_pause_seconds,
     latest_telemetry_point,
     latest_temperature_c,
@@ -161,12 +162,6 @@ def train_qlora(
     assert spec.base_model is not None
     random.seed(spec.seed)
     torch.manual_seed(spec.seed)
-    if torch.get_num_threads() > 2:
-        torch.set_num_threads(2)
-    try:
-        torch.set_num_interop_threads(1)
-    except RuntimeError:
-        pass
     run = Path(resume) if resume else Path(spec.artifacts_dir) / (
         f"{time.strftime('%Y%m%d-%H%M%S')}-qlora-{uuid.uuid4().hex[:8]}"
     )
@@ -289,16 +284,8 @@ def train_qlora(
             thermal_abort = True
             break
         if pause:
-            if pause >= 2.0 and progress:
-                remaining = pause
-                recovery_floor = spec.thermal_cruise_max_c if spec.thermal_cruise_max_c is not None else 60.0
-                while remaining > 0:
-                    chunk = min(0.5, remaining)
-                    time.sleep(chunk)
-                    remaining -= chunk
-                    curr_temp = latest_temperature_c(telemetry.points)
-                    if curr_temp is not None and curr_temp <= recovery_floor:
-                        break
+            def notify_cooling(remaining: float, current: float | None) -> None:
+                if progress:
                     progress(ProgressEvent(
                         "step",
                         step=step,
@@ -306,15 +293,20 @@ def train_qlora(
                         elapsed_seconds=time.perf_counter() - training_started,
                         tokens_per_second=(tokens - initial_tokens) / max(1e-6, time.perf_counter() - training_started),
                         loss=loss_sum,
-                        gpu_temperature_c=curr_temp,
+                        gpu_temperature_c=current,
                         vram_bytes=int(torch.cuda.memory_allocated()),
                         thermal_pause_seconds=remaining,
                         thermal_state="pit-stop-cooldown",
                         initial_step=initial_step,
                     ))
-            else:
-                time.sleep(pause)
-            thermal_pause_seconds += pause
+
+            thermal_pause_seconds += cooling_pause(
+                pause,
+                lambda: latest_temperature_c(telemetry.points),
+                recovery_c=spec.thermal_cruise_max_c if spec.thermal_cruise_max_c is not None else 60.0,
+                abort_c=spec.thermal_abort_c,
+                notify=notify_cooling if progress else None,
+            )
             temperature = latest_temperature_c(telemetry.points)
             if temperature is not None and temperature >= spec.thermal_abort_c:
                 thermal_abort = True

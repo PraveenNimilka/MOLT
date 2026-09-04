@@ -82,12 +82,18 @@ def test_config_paths_expand_environment_variables_without_fallback(
         TrainingSpec.from_dict(value)
 
 
-def test_completed_run_cannot_be_resumed(tmp_path: Path) -> None:
+def test_completed_run_cannot_be_resumed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    initial_threads = torch.get_num_threads()
+    def forbidden(*args: object) -> None:
+        pytest.fail("Training must not mutate process-global thread settings")
+    monkeypatch.setattr(torch, "set_num_threads", forbidden)
+    monkeypatch.setattr(torch, "set_num_interop_threads", forbidden)
     tokens = tmp_path / "tokens.bin"
     torch.arange(32, dtype=torch.int32).numpy().tofile(tokens)
     spec = TrainingSpec.from_dict(_config(tokens, tmp_path / "runs"))
     spec.validate()
     run = train(spec)
+    assert torch.get_num_threads() == initial_threads
 
     assert AtomicCheckpointStore(run).load()["termination_reason"] == "completed"
     with pytest.raises(ValueError, match="already complete"):

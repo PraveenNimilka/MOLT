@@ -15,10 +15,10 @@ molt
 MOLT inspects your hardware and displays an interactive landing menu:
 ```text
 ╭─ [ MOLT AI INFRASTRUCTURE ] ───────────────────────────────────────╮
-│ Version       v0.9.0 (Release Candidate)                           │
+│ Version       v0.9.1 (Alpha)                                       │
 │ Hardware      NVIDIA GeForce RTX 4060 Laptop GPU 8.0 GB            │
 │ Recommended   BALANCED                                             │
-│ Pillars       Dual-Gear Thermals • 4-bit NF4 QLoRA • Zero-RAM MMap │
+│ Pillars       Dual-Gear Thermals • 4-bit NF4 QLoRA • OS MMap        │
 ╰────────────────────────────────────────────────────────────────────╯
 
 Select an action:

@@ -41,7 +41,7 @@ from molt_stream.core.discovery import (
     init_workspace,
 )
 from molt_stream.core.profiles import PROFILES, apply_profile, get_profile
-from molt_stream.core.system_tuning import activate_prioritized_tuning
+from molt_stream.core.system_tuning import prioritized_execution
 from molt_stream.experiments.store import sha256
 
 
@@ -224,7 +224,7 @@ def _resolve_execution_mode(requested: str | None, ui: TerminalUI) -> str:
         "Execution Mode",
         [
             ("1. Normal Mode", "Standard OS priority and background defaults (Recommended)"),
-            ("2. Prioritized Mode", "Above-normal CPU priority and Windows Defender exclusions"),
+            ("2. Prioritized Mode", "Temporary MOLT priority; other apps and Defender unchanged"),
         ],
     )
     try:
@@ -293,7 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Select execution profile: normal or prioritize",
     )
-    training.add_argument("--dry-run", action="store_true", help="Resolve spec and memory estimates without starting CUDA compute")
+    training.add_argument("--dry-run", action="store_true", help="Validate specification without training or host tuning; does not verify VRAM fit")
     training.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
 
     # 6. resume
@@ -598,26 +598,9 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
 
     # Execution Mode (Normal vs Prioritize)
     selected_mode = _resolve_execution_mode(args.mode_select, ui)
-    if selected_mode == "prioritize":
-        tuning = activate_prioritized_tuning(spec)
-        spec = tuning["tuned_spec"]
-        if ui.enabled:
-            def_status = "Active" if any(tuning["defender_exclusions"].values()) else "Checked"
-            bg_apps = ", ".join(tuning["background_gpu"]) if tuning["background_gpu"] else "None"
-            suspended_count = f"{len(tuning['suspended_apps'])} apps frozen" if tuning["suspended_apps"] else "None (Clean)"
-            ui.card("Host Tuning & Thermal Policy", [
-                ("Process Priority", "Above Normal" if tuning["priority_elevated"] else "Standard"),
-                ("Gear 1", "Unthrottled compute (0ms pause)"),
-                ("Gear 2", f"Thermal pacing ({int(spec.thermal_pause_seconds*1000)}ms at >= {spec.thermal_target_c:.1f}°C)"),
-                ("Cooldown Target", f"<= {spec.thermal_cruise_max_c:.1f}°C"),
-                ("Thermal Limit", f"{spec.thermal_abort_c:.1f}°C"),
-                ("Suspended Background", suspended_count),
-                ("Defender Exclusions", def_status),
-            ])
-
+    spec.validate()
     # Pre-Flight Card
     hw = get_hardware_info()
-    est_vram = "6.2 GB" if spec.mode == "qlora" else "0.8 GB"
     if ui.enabled:
         ui.card("MOLT Pre-Flight Configuration", [
             ("Mode", spec.mode.upper()),
@@ -627,8 +610,10 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             ("Context Length", spec.data.context_length),
             ("Batch Size", f"{spec.batch_size} × {spec.gradient_accumulation}"),
             ("Thermal Target", f"{spec.thermal_target_c:.1f}°C (pause: {int(spec.thermal_pause_seconds*1000)}ms)"),
+            ("Thermal Policy", spec.thermal_control_mode),
+            ("Thermal Abort", f"{spec.thermal_abort_c:.1f}°C"),
             ("GPU Detected", hw["gpu_name"] or "CUDA Device"),
-            ("Estimated VRAM", est_vram),
+            ("VRAM requirement", "Measured during training; fit not guaranteed"),
         ])
 
     if args.dry_run:
@@ -647,10 +632,10 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             print("[MOLT] Training cancelled by user.")
             return 0
 
-    if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
-        return 0
-
-    path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+    with prioritized_execution(selected_mode == "prioritize") as elevated:
+        if ui.enabled and selected_mode == "prioritize":
+            ui.check("Temporary MOLT priority enabled" if elevated else "Using standard process priority")
+        path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
     title = "Training stopped" if summary.get("state") == "thermal_abort" else "Training complete"
@@ -686,9 +671,6 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
     root = Path(run_path)
     spec = load_spec(root / "spec.resolved.json")
     selected_mode = _resolve_execution_mode(args.mode_select, ui)
-    if selected_mode == "prioritize":
-        tuning = activate_prioritized_tuning(spec)
-        spec = tuning["tuned_spec"]
 
     if ui.enabled:
         ui.check(f"Resuming run from {root.name}")
@@ -696,7 +678,10 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
     if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
         return 0
 
-    path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+    with prioritized_execution(selected_mode == "prioritize") as elevated:
+        if ui.enabled and selected_mode == "prioritize":
+            ui.check("Temporary MOLT priority enabled" if elevated else "Using standard process priority")
+        path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
     title = "Training stopped" if summary.get("state") == "thermal_abort" else "Training resumed"
@@ -769,7 +754,7 @@ def guided_landing(ui: TerminalUI) -> int:
     vram_label = f"{hw['gpu_vram_total_gb']} GB" if hw["gpu_vram_total_gb"] else ""
 
     ui.card("MOLT AI Infrastructure", [
-        ("Version", f"v{__version__} (Release Candidate)"),
+        ("Version", f"v{__version__} (Alpha)"),
         ("Hardware", f"{gpu_label} {vram_label}".strip()),
         ("Recommended Profile", hw["suggested_profile"]),
         ("Architecture", "Dual-Gear Thermal Control • 4-bit NF4 QLoRA • Memory-Mapped I/O"),
@@ -857,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
             spec = load_spec(args.config)
             value = {"path": spec.data.path, "bytes": Path(spec.data.path).stat().st_size, "storage_backend": "mmap", "validated": True}
             if ui.enabled:
-                ui.check("Zero-RAM memory-mapped dataset initialized")
+                ui.check("Memory-mapped dataset initialized")
             output(value, title="Dataset info", rows=[("State", "ready"), ("Path", value["path"]), ("Size", _bytes(value["bytes"])), ("Backend", "OS mmap")])
         elif args.command == "train":
             return handle_guided_train(args, ui, output)

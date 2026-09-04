@@ -249,7 +249,7 @@ wheels = [
 
 [[package]]
 name = "molt-ai-infrastructure"
-version = "0.2.0"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -286,7 +286,7 @@ requires-dist = [
     { name = "peft", marker = "extra == 'qlora'", specifier = ">=0.17,<1" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.0" },
-    { name = "torch", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torch", specifier = ">=2.4.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "transformers", marker = "extra == 'qlora'", specifier = ">=5,<6" },
     { name = "triton-windows", marker = "extra == 'windows-fusion'", specifier = ">=3.4,<3.5" },
 ]
