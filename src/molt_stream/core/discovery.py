@@ -9,6 +9,8 @@ Provides automatic zero-configuration discovery of:
 """
 from __future__ import annotations
 
+from molt_stream.core.workspace import workspace_paths
+
 import json
 import os
 import platform
@@ -106,11 +108,10 @@ def get_hardware_info() -> dict[str, Any]:
 def find_models(search_roots: list[Path] | None = None) -> list[dict[str, Any]]:
     """Scan candidate directories for loadable models."""
     if search_roots is None:
-        search_roots = [
+        search_roots = workspace_paths("models") or [
             Path("models"),
             Path("molt-workspace/models"),
             Path("../AI MODELS"),
-            Path("D:/Projects/MOLT TEST/AI MODELS"),
             Path.home() / ".cache" / "huggingface" / "hub",
         ]
 
@@ -155,13 +156,11 @@ def find_models(search_roots: list[Path] | None = None) -> list[dict[str, Any]]:
 def find_datasets(search_roots: list[Path] | None = None) -> list[dict[str, Any]]:
     """Scan candidate directories for binary token datasets."""
     if search_roots is None:
-        search_roots = [
+        search_roots = workspace_paths("datasets") or [
             Path("datasets"),
             Path("molt-workspace/datasets"),
             Path("data/prepared"),
             Path("data"),
-            Path("../Benchmark 001/001/dataset"),
-            Path("D:/Projects/MOLT TEST/Benchmark 001/001/dataset"),
         ]
 
     datasets: list[dict[str, Any]] = []
@@ -194,13 +193,11 @@ def find_datasets(search_roots: list[Path] | None = None) -> list[dict[str, Any]
 def find_runs(search_roots: list[Path] | None = None) -> list[dict[str, Any]]:
     """Scan candidate directories for prior training runs and checkpoints."""
     if search_roots is None:
-        search_roots = [
+        search_roots = workspace_paths("runs") or [
             Path("runs"),
             Path("molt-workspace/runs"),
             Path("artifacts/molt-stream/runs"),
             Path("artifacts/molt-stream"),
-            Path("../Benchmark 001/001/runs"),
-            Path("D:/Projects/MOLT TEST/Benchmark 001/001/runs"),
         ]
 
     runs: list[dict[str, Any]] = []
@@ -239,7 +236,10 @@ def find_runs(search_roots: list[Path] | None = None) -> list[dict[str, Any]]:
                         try:
                             meta = json.loads(complete_json.read_text("utf-8"))
                             if meta.get("sha256"):
-                                integrity = "Verified (SHA-256)"
+                                from molt_stream.core.integrity import valid_checkpoint
+                                integrity = ("Verified (SHA-256)" if valid_checkpoint(
+                                    run_dir / "checkpoint.pt", complete_json
+                                ) else "Invalid checkpoint")
                         except Exception:
                             integrity = "Unverified"
                     else:
@@ -288,11 +288,10 @@ def init_workspace(root: Path = Path("molt-workspace")) -> dict[str, Path]:
     if not sample_config.exists():
         sample = {
             "mode": "qlora",
-            "profile": "balanced",
-            "base_model": "models/qwen2-0.5b",
+            "base_model": str((root / "models/qwen2-0.5b").resolve()),
             "data": {
-                "path": "datasets/train.bin",
-                "validation_path": "datasets/val.bin",
+                "path": str((root / "datasets/train.bin").resolve()),
+                "validation_path": str((root / "datasets/val.bin").resolve()),
                 "context_length": 1024,
                 "storage_dtype": "int32",
                 "sequential": True,
@@ -303,8 +302,13 @@ def init_workspace(root: Path = Path("molt-workspace")) -> dict[str, Path]:
             "max_steps": 1000,
             "learning_rate": 0.00015,
             "seed": 2026,
-            "artifacts_dir": "runs"
+            "artifacts_dir": str(dirs["runs"].resolve())
         }
         sample_config.write_text(json.dumps(sample, indent=2), encoding="utf-8")
 
+    manifest = root / "molt-workspace.json"
+    if not manifest.exists():
+        with manifest.open("x", encoding="utf-8") as handle:
+            json.dump({"schema_version": 1, "paths": {key: str(path.resolve())
+                      for key, path in dirs.items()}}, handle, indent=2)
     return dirs

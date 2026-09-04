@@ -141,6 +141,8 @@ class TrainingSpec:
         self.data.validate()
         self.model.validate()
         self.stream.validate()
+        if self.mode == TrainingMode.PRETRAIN and self.data.context_length != self.model.context_length:
+            raise ValueError("data and model context lengths must match for pretraining")
         if min(self.batch_size, self.gradient_accumulation, self.max_steps) <= 0:
             raise ValueError("batch, accumulation and max_steps must be positive")
         if self.evaluation_interval is not None and self.evaluation_interval <= 0:

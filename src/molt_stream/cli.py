@@ -42,7 +42,7 @@ from molt_stream.core.discovery import (
 )
 from molt_stream.core.profiles import PROFILES, apply_profile, get_profile
 from molt_stream.core.system_tuning import prioritized_execution
-from molt_stream.experiments.store import sha256
+from molt_stream.core.integrity import sha256
 
 
 class TerminalUI:
@@ -255,6 +255,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = parser.add_subparsers(dest="command", required=False)
 
+    commands.add_parser("doctor", help="Show installation identity, environment, and optional capabilities")
+    commands.add_parser("runs", help="List saved runs and verified checkpoint status")
+    fit = commands.add_parser("fit-test", help="Run two optimizer steps at configured geometry; not a sustained benchmark")
+    fit.add_argument("--config", required=True)
+    export = commands.add_parser("export", help="Export a verified MOLT bundle, excluding base weights and data")
+    export.add_argument("--run", required=True)
+    export.add_argument("--output-dir", required=True)
+
     # 1. info
     commands.add_parser("info", help="Display hardware diagnostics, VRAM, and suggested profiles")
 
@@ -268,7 +276,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 4. prepare
     prepare = commands.add_parser("prepare", help="Validate an mmap-ready token file")
-    prepare.add_argument("--config", required=True)
+    prepare.add_argument("--config", help="Validate an existing binary dataset configuration")
+    prepare.add_argument("--text-file", help="Tokenize local UTF-8 text into a new dataset directory")
+    prepare.add_argument("--tokenizer", help="Local tokenizer/model directory")
+    prepare.add_argument("--base-model", help="Local base model; also emit a starter QLoRA training config")
+    prepare.add_argument("--output-dir", help="New output directory; existing directories are never overwritten")
+    prepare.add_argument("--validation-fraction", type=float, default=0.1)
 
     # 5. train
     training = commands.add_parser("train", help="Run model training with hardware-aware thermal pacing")
@@ -344,7 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     generate = commands.add_parser("generate", help="Generate greedy token IDs")
     generate.add_argument("--run", required=True)
-    generate.add_argument("--prompt-ids", required=True, help="Comma-separated token IDs")
+    prompts = generate.add_mutually_exclusive_group(required=True)
+    prompts.add_argument("--prompt-ids", help="Comma-separated token IDs")
+    prompts.add_argument("--prompt", help="Text prompt using the model tokenizer")
+    generate.add_argument("--tokenizer", help="Local tokenizer, required for text with scratch models")
     generate.add_argument("--max-new-tokens", type=int, default=32)
 
     tune = commands.add_parser("stream-tune", help="Benchmark double-buffered NF4+LoRA streaming")
@@ -381,7 +397,33 @@ def build_parser() -> argparse.ArgumentParser:
     qlora_benchmark.add_argument("--batches", type=int, default=8)
     qlora_benchmark.add_argument("--split", choices=("train", "validation"), default="validation")
 
+    for command_parser in commands.choices.values():
+        for option in ("--json", "--ui", "--no-color", "--debug"):
+            command_parser.add_argument(option, action="store_true", default=argparse.SUPPRESS,
+                                        help=argparse.SUPPRESS)
+    research = commands.add_parser("research", help="Experimental benchmarks and evidence comparisons")
+    experiments = research.add_subparsers(dest="research_command", required=True)
+    for name in ("compare", "compare-paired", "frontier", "stream-tune", "fusion-benchmark",
+                 "curriculum-benchmark", "loss-partition-benchmark", "qlora-benchmark"):
+        experiments.add_parser(name, parents=[commands.choices[name]], add_help=False)
     return parser
+
+
+def handle_doctor(ui: TerminalUI, output_func: Any) -> int:
+    from molt_stream.training.diagnostics import doctor
+    value = doctor()
+    output_func(value, title="MOLT Doctor", rows=[
+        ("Version", value["version"]), ("Commit", value["git_commit"] or "Installed package"),
+        ("Python executable", value["python_executable"]), ("Package", value["package_path"]),
+        ("Environment", "Virtual environment" if value["virtual_environment"] else "Global Python — check launcher"),
+        ("GPU", value.get("gpu", "CUDA unavailable")),
+        ("VRAM", _bytes(value.get("gpu_vram_bytes"))),
+        ("System RAM", _bytes(value["system_ram_bytes"])),
+        ("QLoRA packages", "Detected; workload not verified" if value["qlora_8b_ready"] else "Missing optional packages"),
+        ("Triton", "Detected; compile probe required" if value["triton"] else "Optional; not installed"),
+        ("Next", "molt config --init | molt prepare --help"),
+    ])
+    return 0
 
 
 def handle_info(ui: TerminalUI, output_func: Any) -> int:
@@ -588,6 +630,15 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
         )
         spec = apply_profile(spec, profile_name)
 
+    # CLI overrides take precedence over the saved configuration.
+    if args.batch_size is not None:
+        spec = replace(spec, batch_size=args.batch_size)
+    if args.learning_rate is not None:
+        spec = replace(spec, learning_rate=args.learning_rate)
+    if args.context_length is not None:
+        spec = replace(spec, data=replace(spec.data, context_length=args.context_length),
+                       model=replace(spec.model, context_length=args.context_length))
+
     # Overrides if explicitly provided on command line
     if args.seed is not None:
         spec = replace(spec, seed=args.seed)
@@ -649,7 +700,7 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
 
     run_path = args.run
     if not run_path:
-        runs = find_runs()
+        runs = [run for run in find_runs() if run["state"] != "completed" and run["checkpoint"]]
         if not runs:
             raise MoltError("No prior training runs detected in workspace to resume.")
         if ui.enabled:
@@ -726,14 +777,13 @@ def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: 
         return 0 if summary.get("state") == "completed" else 1
 
     spec = load_spec(args.config)
-    value = benchmark_stream_throughput(spec, warmup_steps=args.warmup_steps, steps=args.steps)
+    value = benchmark_stream_throughput(spec, warmup_steps=args.warmup_steps, measured_steps=args.steps)
     rows = [
-        ("Throughput", f"{value['tokens_per_second']:,.2f} tok/s"),
-        ("Active Throughput", f"{value['active_tokens_per_second']:,.2f} tok/s"),
-        ("Duration", f"{value['total_seconds']:.2f}s"),
+        ("Throughput", f"{(value.get('sustained_tokens_per_second') or 0):,.2f} tok/s"),
+        ("Duration", f"{value['total_seconds_including_setup_and_warmup']:.2f}s"),
     ]
     output_func(value, title="Sustained Throughput Benchmark", rows=rows)
-    return 0
+    return 1 if value.get("thermal_abort") else 0
 
 
 def guided_landing(ui: TerminalUI) -> int:
@@ -753,7 +803,7 @@ def guided_landing(ui: TerminalUI) -> int:
     print(ui._style("  1. Train", ui.WHITE) + "             Start a new training run")
     print(ui._style("  2. Resume", ui.WHITE) + "            Resume from a verified checkpoint")
     print(ui._style("  3. Benchmark", ui.WHITE) + "         Run a synthetic hardware smoke test")
-    print(ui._style("  4. Hardware Info", ui.WHITE) + "     Inspect GPU, VRAM, and thermal sensors")
+    print(ui._style("  4. Doctor", ui.WHITE) + "            Check installation identity and hardware")
     print(ui._style("  5. Configuration", ui.WHITE) + "     Initialize workspace and list assets")
     print(ui._style("  6. Exit", ui.MUTED))
 
@@ -783,7 +833,7 @@ def guided_landing(ui: TerminalUI) -> int:
     elif choice == "3":
         return handle_benchmark_cmd(dummy_args, ui, output_func)
     elif choice == "4":
-        return handle_info(ui, output_func)
+        return handle_doctor(ui, output_func)
     elif choice == "5":
         return handle_config(dummy_args, ui, output_func)
     elif choice == "6":
@@ -796,7 +846,12 @@ def guided_landing(ui: TerminalUI) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
+    if args.json and args.ui:
+        parser.error("--json and --ui cannot be combined")
+    if args.command == "research":
+        args.command = args.research_command
 
     ui = TerminalUI(
         enabled=args.ui or (not args.json and sys.stdout.isatty()),
@@ -818,7 +873,23 @@ def main(argv: list[str] | None = None) -> int:
         # Guided actions share the same error boundary as explicit commands.
         if args.command is None:
             return guided_landing(ui)
-        if args.command == "info":
+        if args.command == "doctor":
+            return handle_doctor(ui, output)
+        elif args.command == "runs":
+            output(find_runs(), title="Saved runs")
+        elif args.command == "export":
+            from molt_stream.experiments.export import export_run
+            output(export_run(args.run, args.output_dir), title="Export complete")
+        elif args.command == "fit-test":
+            from molt_stream.training.engine import train
+            spec = load_spec(args.config)
+            spec = replace(spec, max_steps=2, artifacts_dir=str(Path(spec.artifacts_dir) / "fit-tests"))
+            root = train(spec, progress=ui.progress if ui.enabled else None)
+            summary = json.loads((root / "metrics.summary.json").read_text("utf-8"))
+            output({"run": str(root), "state": summary["state"],
+                    "scope": "Two-step geometry check only; not sustained reliability"}, title="Fit test")
+            return 0 if summary["state"] == "completed" else 1
+        elif args.command == "info":
             return handle_info(ui, output)
         elif args.command == "config":
             return handle_config(args, ui, output)
@@ -827,7 +898,18 @@ def main(argv: list[str] | None = None) -> int:
             value = inspect_capabilities()
             output(value, title="Workspace info", rows=[(k, v) for k, v in value.items()])
         elif args.command == "prepare":
+            if args.text_file:
+                if args.config or not args.tokenizer or not args.output_dir:
+                    raise ValueError("Text preparation needs --tokenizer and --output-dir, without --config")
+                from molt_stream.data.text import prepare_text
+                value = prepare_text(args.text_file, args.tokenizer, args.output_dir,
+                                     args.validation_fraction, args.base_model)
+                output(value, title="Dataset prepared")
+                return 0
+            if not args.config:
+                raise ValueError("Provide --config or --text-file with --tokenizer and --output-dir")
             spec = load_spec(args.config)
+            spec.validate()
             value = {"path": spec.data.path, "bytes": Path(spec.data.path).stat().st_size, "storage_backend": "mmap", "validated": True}
             if ui.enabled:
                 ui.check("Memory-mapped dataset initialized")
@@ -854,58 +936,74 @@ def main(argv: list[str] | None = None) -> int:
                 minimum_improvement_percent=args.minimum_improvement_percent,
                 thermal_peak_tolerance_c=args.thermal_peak_tolerance_c,
             )
+            if args.output:
+                from molt_stream.measurement.comparison import write_comparison
+                write_comparison(args.output, value)
             output(value, title="Run Comparison")
         elif args.command == "compare-paired":
-            from molt_stream.measurement.comparison import aggregate_comparisons
-            value = aggregate_comparisons(
-                args.pair,
+            from molt_stream.measurement.comparison import aggregate_comparisons, compare_runs
+            comparisons = [compare_runs(a, b,
                 quality_tolerance_percent=args.quality_tolerance_percent,
                 minimum_improvement_percent=args.minimum_improvement_percent,
-                thermal_peak_tolerance_c=args.thermal_peak_tolerance_c,
+                thermal_peak_tolerance_c=args.thermal_peak_tolerance_c) for a, b in args.pair]
+            value = aggregate_comparisons(
+                comparisons,
                 bootstrap_samples=args.bootstrap_samples,
                 bootstrap_seed=args.bootstrap_seed,
             )
+            if args.output:
+                from molt_stream.measurement.comparison import write_comparison
+                write_comparison(args.output, value)
             output(value, title="Paired Comparison")
         elif args.command == "frontier":
             from molt_stream.measurement.frontier import build_frontier
             value = build_frontier(args.runs)
             output(value, title="Frontier")
         elif args.command == "generate":
-            from molt_stream.training.model import generate_tokens
+            from molt_stream.training.engine import generate_run
+            if args.prompt is not None:
+                from molt_stream.training.text import generate_text
+                value = generate_text(args.run, args.prompt, args.tokenizer, args.max_new_tokens)
+                output(value, title="Generated Text")
+                return 0
             tokens = [int(x.strip()) for x in args.prompt_ids.split(",") if x.strip()]
-            value = generate_tokens(args.run, tokens, max_new_tokens=args.max_new_tokens)
+            if not tokens or args.max_new_tokens <= 0:
+                raise ValueError("Provide prompt IDs and positive max_new_tokens")
+            value = generate_run(args.run, tokens, max_new_tokens=args.max_new_tokens)
             output(value, title="Generated Tokens")
         elif args.command == "stream-tune":
-            from molt_stream.streaming.engine import benchmark_nf4_streaming
-            value = benchmark_nf4_streaming(
-                width=args.width, layers=args.layers, sequence_length=args.sequence,
-                batch_size=args.batch, steps=args.steps, lora_rank=args.rank,
-                bundle_size=args.bundle_size, seed=args.seed, synchronous=args.synchronous,
+            from molt_stream.training.stream_benchmark import stream_tune
+            value = stream_tune(
+                width=args.width, layers=args.layers, sequence=args.sequence,
+                batch=args.batch, steps=args.steps, rank=args.rank,
+                bundle_size=args.bundle_size, seed=args.seed, double_buffer=not args.synchronous,
             )
             output(value, title="Stream Tune")
         elif args.command == "fusion-benchmark":
-            from molt_stream.kernels.fused import benchmark_fusion_memory
-            value = benchmark_fusion_memory(load_spec(args.config))
+            from molt_stream.training.throughput import fusion_memory_benchmark
+            value = fusion_memory_benchmark(load_spec(args.config))
             output(value, title="Fusion Benchmark")
         elif args.command == "curriculum-benchmark":
-            from molt_stream.training.curriculum import run_curriculum_benchmark
+            from molt_stream.training.curriculum import run_curriculum_experiment
             seeds = [int(x.strip()) for x in args.seeds.split(",") if x.strip()]
-            value = run_curriculum_benchmark(load_spec(args.config), seeds=seeds, eval_interval=args.eval_interval)
+            value = run_curriculum_experiment(load_spec(args.config), seeds=tuple(seeds), eval_interval=args.eval_interval)
             output(value, title="Curriculum Benchmark")
         elif args.command == "loss-partition-benchmark":
-            from molt_stream.training.loss_partition import benchmark_loss_partitioning
+            from molt_stream.training.loss_partition import benchmark_exact_loss_partitioning
             chunks = [int(x.strip()) for x in args.chunks.split(",") if x.strip()]
-            value = benchmark_loss_partitioning(load_spec(args.config), chunk_sizes=chunks, warmup_steps=args.warmup_steps, steps=args.steps)
+            value = benchmark_exact_loss_partitioning(load_spec(args.config), chunk_sizes=tuple(chunks), warmup_steps=args.warmup_steps, measured_steps=args.steps)
             output(value, title="Loss Partition Benchmark")
         elif args.command == "power-limit":
-            from molt_stream.measurement.telemetry import query_power_limit, set_power_limit
-            if args.apply:
-                set_power_limit(args.watts)
-            value = query_power_limit()
+            from molt_stream.measurement.telemetry import manage_power_limit
+            value = manage_power_limit(args.watts, apply=args.apply)
             output(value, title="Power Limit")
+            return 1 if args.apply and not value.get("verified") else 0
         elif args.command == "qlora-benchmark":
-            from molt_stream.training.qlora import benchmark_saved_qlora
-            value = benchmark_saved_qlora(args.run, batches=args.batches, split=args.split)
+            from molt_stream.training.qlora import benchmark_qlora_adapter
+            spec = load_spec(Path(args.run) / "spec.resolved.json")
+            if spec.mode != "qlora":
+                raise ValueError("qlora-benchmark requires a QLoRA run")
+            value = benchmark_qlora_adapter(spec, args.run, batches=args.batches, split=args.split)
             output(value, title="QLoRA Benchmark")
         return 0
 

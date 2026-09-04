@@ -17,7 +17,7 @@ from molt_stream.core.specs import TrainingSpec
 PROFILES: dict[str, dict[str, Any]] = {
     "speed": {
         "name": "SPEED",
-        "description": "Maximum throughput with higher thermal ceiling (82°C limit)",
+        "description": "Less pacing: begins at 82°C; abort boundary 85°C",
         "thermal_control_mode": "dual-gear",
         "thermal_target_c": 82.0,
         "thermal_cruise_max_c": 80.0,
@@ -26,7 +26,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
     "balanced": {
         "name": "BALANCED",
-        "description": "High throughput with Dual-Gear thermal pacing (74°C limit)",
+        "description": "Balanced pacing: begins at 74°C; abort boundary 85°C",
         "thermal_control_mode": "dual-gear",
         "thermal_target_c": 74.0,
         "thermal_cruise_max_c": 65.0,
@@ -35,7 +35,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
     "cool": {
         "name": "COOL",
-        "description": "Conservative thermal target for quiet operation or laptops (68°C limit)",
+        "description": "Earlier pacing: begins at 68°C; abort boundary 82°C",
         "thermal_control_mode": "dual-gear",
         "thermal_target_c": 68.0,
         "thermal_cruise_max_c": 60.0,
@@ -44,7 +44,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
     "energy": {
         "name": "ENERGY",
-        "description": "Optimized duty cycle for energy efficiency per token (70°C limit)",
+        "description": "Energy experiment preset: pacing at 70°C; savings are workload-dependent",
         "thermal_control_mode": "dual-gear",
         "thermal_target_c": 70.0,
         "thermal_cruise_max_c": 62.0,

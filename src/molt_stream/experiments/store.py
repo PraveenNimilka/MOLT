@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,14 +8,7 @@ from typing import Any
 import torch
 
 from molt_stream.core.errors import IntegrityError
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+from molt_stream.core.integrity import sha256, valid_checkpoint
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -56,11 +48,7 @@ class AtomicCheckpointStore:
 
     @staticmethod
     def _valid(data: Path, metadata: Path) -> bool:
-        try:
-            record = json.loads(metadata.read_text("utf-8"))
-            return data.stat().st_size == record["bytes"] and sha256(data) == record["sha256"]
-        except (OSError, KeyError, ValueError, json.JSONDecodeError):
-            return False
+        return valid_checkpoint(data, metadata)
 
     def resolve(self) -> Path:
         for stem in ("checkpoint", "checkpoint.previous"):

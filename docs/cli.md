@@ -2,6 +2,53 @@
 
 MOLT provides both a **guided interactive menu** and **direct command-line flags** for advanced scripting.
 
+## 0.9.2 customer workflow
+
+Use the checkout's `.venv\Scripts\molt.exe` if `molt doctor` shows an unexpected
+global Python installation. `doctor` is the primary combined diagnostic view;
+`info` and `inspect` retain their legacy output for compatibility.
+
+```powershell
+molt doctor --ui
+molt config --init
+molt runs
+```
+
+For text preparation, replace `stories.txt` and `models/my-model` below with your
+actual local text and model directories. Nothing is downloaded implicitly:
+
+```powershell
+molt prepare --text-file stories.txt --tokenizer models/my-model --base-model models/my-model --output-dir molt-workspace/datasets/stories
+molt train --config molt-workspace/datasets/stories/training.json --dry-run
+molt fit-test --config molt-workspace/datasets/stories/training.json
+molt train --config molt-workspace/datasets/stories/training.json --ui
+```
+
+Preparation writes little-endian int32 tokens, a saved tokenizer, and provenance
+metadata. The final 10% of tokens form a contiguous validation tail (adjust with
+`--validation-fraction`); this is not a document-level split. Text is tokenized in
+bounded 65,536-character chunks without special tokens. Existing output folders
+are refused. `--base-model` additionally emits a conservative 20-step QLoRA starter
+config. Inspect and adjust that config before a substantive training run.
+
+Use the actual run path printed by training in place of `RUN_DIRECTORY`:
+
+```powershell
+molt evaluate --run RUN_DIRECTORY
+molt generate --run RUN_DIRECTORY --prompt "Once upon a time" --max-new-tokens 32
+molt export --run RUN_DIRECTORY --output-dir exported-run
+```
+
+Scratch models require `--tokenizer` for text generation. `--prompt-ids` remains
+available. Export verifies hashes, refuses existing destinations, and excludes
+base weights/data; it is a MOLT bundle, not a standalone Hugging Face model.
+
+`molt research --help` groups experimental commands; existing top-level names are
+retained. CLI batch/context/learning-rate/seed/steps overrides take precedence
+over configurations. Relative paths in existing configs retain working-directory
+semantics; newly generated configs use absolute paths. Workspace discovery uses
+the nearest `molt-workspace.json` before legacy directory conventions.
+
 ---
 
 ## 1. Guided Interactive Mode
@@ -15,7 +62,7 @@ molt
 MOLT inspects your hardware and displays an interactive landing menu:
 ```text
 ╭─ [ MOLT AI INFRASTRUCTURE ] ───────────────────────────────────────╮
-│ Version       v0.9.1 (Alpha)                                       │
+│ Version       v0.9.2 (Alpha)                                       │
 │ Hardware      NVIDIA GeForce RTX 4060 Laptop GPU 8.0 GB            │
 │ Recommended   BALANCED                                             │
 │ Pillars       Dual-Gear Thermals • 4-bit NF4 QLoRA • OS MMap        │
@@ -61,7 +108,7 @@ molt train --config configs/molt-stream-smoke.json -y
 * `--profile {speed,balanced,cool,energy}`: High-level thermal policy profile.
 * `--steps <int>`: Override max optimization steps.
 * `--batch-size <int>`: Micro-batch size.
-* `--dry-run`: Validate spec and memory estimation without starting compute.
+* `--dry-run`: Validate configuration/data paths without compute; does not prove VRAM fit.
 * `-y, --yes`: Skip confirmation prompt.
 * `--debug`: Output complete Python tracebacks on error.
 

@@ -14,7 +14,7 @@ import torch
 
 from molt_stream.core.errors import CapabilityError
 from molt_stream.core.contracts import ProgressEvent
-from molt_stream.core.specs import TrainingMode, TrainingSpec
+from molt_stream.core.specs import TrainingMode, TrainingSpec, load_spec
 from molt_stream.data.bytes import MMapTokenBatcher
 from molt_stream.experiments.store import AtomicCheckpointStore
 from molt_stream.measurement.telemetry import NVMLTelemetry, manage_power_limit
@@ -27,15 +27,6 @@ from molt_stream.measurement.thermal import (
 from molt_stream.kernels.compiler import prepare_execution_model
 from molt_stream.training.galore import GaLoreAdamW
 from molt_stream.training.model import SmallCausalLM
-
-
-def load_spec(path: str | Path) -> TrainingSpec:
-    value = json.loads(Path(path).read_text("utf-8"))
-    spec = TrainingSpec.from_dict(value)
-    spec.validate()
-    if spec.data.context_length != spec.model.context_length:
-        raise ValueError("data and model context lengths must match")
-    return spec
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -298,6 +289,7 @@ def train(
 def evaluate_run(run: str | Path) -> dict[str, float]:
     root = Path(run)
     spec = load_spec(root / "spec.resolved.json")
+    spec.validate()
     if spec.mode == TrainingMode.QLORA:
         from molt_stream.training.qlora import evaluate_qlora
 
@@ -320,6 +312,7 @@ def evaluate_run(run: str | Path) -> dict[str, float]:
 def generate_run(run: str | Path, prompt: list[int], max_new_tokens: int = 32) -> list[int]:
     root = Path(run)
     spec = load_spec(root / "spec.resolved.json")
+    spec.validate()
     if spec.mode == TrainingMode.QLORA:
         from molt_stream.training.qlora import generate_qlora
 

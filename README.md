@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.9.1.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.9.2.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 
 MOLT is a Windows-first training runtime for developers and researchers working
@@ -12,7 +12,7 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.9.1 · Open-source alpha.** Suitable for evaluation and
+**Current release: 0.9.2 · Open-source alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
@@ -69,6 +69,18 @@ Or inspect the environment directly:
 The explicit executable path works without activating a virtual environment or
 adding MOLT to your global PATH. If uv is available on PATH, you can also use
 `uv run molt`.
+
+### Recommended workflow
+
+**Install → doctor → workspace → prepare text → fit test → train → evaluate → export.**
+
+`molt doctor` identifies exactly which Python environment and source checkout you
+are running. `molt config --init` creates a workspace manifest.
+`info` and `inspect` remain supported aliases for their older diagnostic views.
+
+Text preparation and text generation are now available. Use
+`molt prepare --help` and `molt generate --help`; use `molt research --help` for
+experimental benchmarks. Legacy top-level research commands remain compatible.
 
 ### Train with your own data
 
@@ -142,10 +154,10 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-The setup implementation passed 100 local tests and its small CUDA/compiled
-backward probes on the development laptop. Fresh-machine bootstrap and sustained
-workload behavior still require broader reproduction. The live CI badge above,
-not that historical count, represents the latest GitHub test status.
+See the [release verification notes](docs/releases/0.9.2.md) for automated tests
+and physical runtime checks. Fresh-machine bootstrap and sustained workload
+behavior still require broader reproduction. The live CI badge represents the
+latest GitHub test status.
 
 ## Update an existing installation
 
@@ -163,7 +175,7 @@ run artifacts. Back up important checkpoints before changing environments.
 
 Older MOLT versions could add Defender exclusions. These are not removed
 automatically because ownership cannot be inferred safely. Review unwanted
-entries manually in Windows Security; see the [0.9.1 release notes](docs/releases/0.9.1.md).
+entries manually in Windows Security; see the [0.9.1 release notes](docs/releases/0.9.2.md).
 
 ## Documentation
 
@@ -172,7 +184,7 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Architecture](docs/architecture.md)
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
-- [Release notes](docs/releases/0.9.1.md)
+- [Release notes](docs/releases/0.9.2.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
