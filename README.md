@@ -1,150 +1,187 @@
-# MOLT: Hardware-Aware AI Training Runtime
+# MOLT AI Infrastructure
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python: 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](pyproject.toml)
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2011%20%7C%2010-lightgrey.svg)](docs/INSTALL.md)
-[Automated tests](tests/)
+**Local model training. Hardware-aware execution. Measurable results.**
 
-**MOLT** is a hardware-aware local LLM training runtime engineered specifically for consumer laptops and workstations. It combines GPU telemetry, configurable thermal pacing, resident 4-bit quantization, and memory-mapped data loading. These mechanisms can reduce resource pressure; they cannot guarantee temperature stability, prevent every OOM, or protect against hardware shutdowns.
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.9.1.md)
+[![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 
-**Release status: open-source alpha.** Production deployments require workload-specific validation, recovery drills, and independent hardware testing.
+MOLT is a Windows-first training runtime for developers and researchers working
+on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
+QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
+into one command-line workflow.
 
----
+**Current release: 0.9.1 · Open-source alpha.** Suitable for evaluation and
+controlled experiments. Production use requires workload-specific validation;
+MOLT does not currently offer a commercial support SLA or certified reliability.
 
-## 🚀 Quick Start
+[Install](#install-in-one-command) · [Quick start](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
 
-### 1. Install MOLT
-```powershell
-git clone https://github.com/PraveenNimilka/MOLT.git
-cd MOLT
+## Install in one command
 
-# Install locked CUDA, QLoRA, and Windows Triton dependencies; verify runtime
+Run in **Windows Command Prompt**, from a directory where you want a new
+`MOLT` folder:
+
+```bat
+git clone https://github.com/PraveenNimilka/MOLT.git && cd MOLT && powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+**Prerequisites:** Git, Windows 10/11 x64, a supported NVIDIA GPU with a compatible
+driver, internet access, and several GB of free disk space. Repository access is
+required if the repository is private. Stop existing training before installation
+or updates.
+
+The installer provisions a project-local `.venv`, obtains uv if needed, and
+installs the locked CUDA PyTorch, QLoRA, and Windows Triton dependencies.
+It then checks dependency imports, CUDA backward computation, and a small compiled
+backward pass against eager results. A failed check stops setup with an error.
+
+No administrator rights are required by the MOLT script. It does not install GPU
+drivers, change Defender settings, suspend applications, or adjust power limits.
+Review [install.ps1](install.ps1) before running it; the execution-policy override
+applies only to that PowerShell invocation.
+
+**Already downloaded the repository?** Open its folder and run:
+
+```bat
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
-Setup uses an isolated `.venv` and installs uv locally if needed. It does not install
-drivers or optional MSVC/Liger tooling. See [installation details](docs/INSTALL.md)
-for download requirements, `-EagerOnly`, and the limits of the runtime checks.
 
+Use `-EagerOnly` to omit Triton and compilation checks, or `-Plan` to preview setup
+without installing anything. Full prerequisites and troubleshooting are in the
+[installation guide](docs/INSTALL.md).
 
-### 2. Launch Guided Training
-From the repository folder:
-```powershell
-.\.venv\Scripts\molt.exe
-```
-MOLT automatically detects your GPU, discovers local models and datasets, and guides you through training:
+## Quick start
 
-```text
-╭─ [ MOLT AI INFRASTRUCTURE ] ───────────────────────────────────────╮
-│ Version       v0.9.1 (Alpha)                                       │
-│ Hardware      NVIDIA GeForce RTX 4060 Laptop GPU 8.0 GB            │
-│ Recommended   BALANCED                                             │
-│ Pillars       Dual-Gear Thermals • 4-bit NF4 QLoRA • Memory-mapped MMap │
-╰────────────────────────────────────────────────────────────────────╯
+From the repository folder, launch the guided interface:
 
-Select an action:
-  1. Train             Start a new training run
-  2. Resume            Resume from a verified checkpoint
-  3. Benchmark         Run a short hardware smoke test
-  4. Hardware Info     Inspect GPU, VRAM, and thermal sensors
-  5. Configuration     Initialize workspace and list assets
-  6. Exit
+```bat
+.venv\Scripts\molt.exe
 ```
 
----
+Or inspect the environment directly:
 
-## ⚡ Direct Command Usage
-
-For scripting and automation:
-
-```powershell
-# Fast training with high-level policy profile
-molt train --model models/qwen2-0.5b --dataset datasets/train.bin --profile balanced
-
-# Dry-run validation (verify specification without training; does not prove workload fit)
-molt train --config configs/molt-stream-production.json --dry-run
-
-# Resume an interrupted run from its atomic checkpoint
-molt resume
-
-# Hardware diagnostics & suggested configuration
-molt info
-
-# Fast short non-destructive benchmark
-molt benchmark --smoke
+```bat
+.venv\Scripts\molt.exe --ui inspect
 ```
 
----
+The explicit executable path works without activating a virtual environment or
+adding MOLT to your global PATH. If uv is available on PATH, you can also use
+`uv run molt`.
 
-## 🛡️ The 4 Core Pillars of MOLT
+### Train with your own data
 
+MOLT does not download model weights or datasets during setup. Training inputs
+must be prepared token binaries with a tokenizer, vocabulary, and storage dtype
+matching the selected model and configuration.
+
+1. Choose a profile from [configs/](configs/) and update its data, model, and
+   artifact paths. Example paths are not bundled datasets.
+2. Validate the configuration before allocating training resources.
+3. Start training, then inspect the resulting run artifacts.
+
+For example, after adapting `configs/molt-stream-production.json`:
+
+```bat
+.venv\Scripts\molt.exe train --config configs\molt-stream-production.json --dry-run
+.venv\Scripts\molt.exe --ui train --config configs\molt-stream-production.json
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       MOLT AI RUNTIME                       │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│  1. Closed-Loop │  2. Memory-mapped    │  3. 4-bit NF4 + LoRA    │
-│     NVML Sensor │     MMap Batcher│     VRAM Compression    │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│         4. Two-Phase Cryptographic Atomic Checkpoints        │
-└─────────────────────────────────────────────────────────────┘
+
+A dry run validates the specification and referenced data paths. It does not
+prove that the model fits in VRAM or that a full run will complete.
+
+Use the guided resume command to select a saved run:
+
+```bat
+.venv\Scripts\molt.exe --ui resume
 ```
 
-1. **Closed-Loop Hardware Pacing (Dual-Gear Transmission):**
-   * Samples GPU temperature, board wattage, and clocks at **10 Hz via NVML**.
-   * **Gear 1 (Sprint):** Computes without pacing when cool ($T < 74^\circ\text{C}$).
-   * **Gear 2 (Pit Cruise):** Inserts calibrated micro-pauses (220ms) when warm ($T \ge 74^\circ\text{C}$), reducing compute duty cycle; cooling depends on the hardware and environment.
-2. **Memory-mapped Data Streaming (`MMapTokenBatcher`):**
-   * Reads tokens directly from NVMe SSD via OS virtual memory mapping.
-   * Does not eagerly load the whole dataset. Resident mapped pages, OS cache, batch tensors, and model/optimizer state still consume RAM; total usage is workload-dependent.
-3. **Resident 4-Bit NF4 Quantization + LoRA:**
-   * Compresses base model into 4-bit NormalFloat4 (NF4) in VRAM. Whether an 8B workload fits in 8GB depends on architecture, context, batch size, adapters, and other GPU users; fit is not guaranteed.
-4. **Two-Phase Atomic Checkpointing:**
-   * Every checkpoint is staged, SHA-256 hashed, and atomically committed (`checkpoint.complete.json`). Checksums detect corruption and atomic publication reduces incomplete-save risks. Unsaved steps can be lost, and filesystem or hardware failures are not covered by a universal crash guarantee.
+See the [CLI reference](docs/cli.md) for profiles, run reports, and automation.
 
----
+## What MOLT provides
 
-## 📊 Benchmark: Empirical Evaluation on Consumer Hardware
+| Capability | Purpose |
+| --- | --- |
+| Small-model pretraining | Train supported causal language models from scratch. |
+| Resident NF4 QLoRA | Adapt supported pretrained models using quantized base weights and LoRA. |
+| Memory-mapped datasets | Read token batches without eagerly loading the complete dataset. |
+| Thermal pacing | Adjust compute duty cycle using sampled GPU temperature and configured limits. |
+| Hardware telemetry | Record GPU board power, energy, temperature, and memory where supported. |
+| Atomic checkpoints | Stage and hash checkpoint files before publication; validate saved state on load. |
+| Experiment reporting | Preserve configuration and measured outcomes for workload comparisons. |
+| Guided and scriptable CLI | Use interactive workflows or structured JSON output. |
 
-**Comparison caveat:** The reported validation perplexities differ between engines. These historical numbers are not an equal-quality advantage, a multiple-seed confidence estimate, or verification of this release. Throttling requires clock/reason telemetry, not temperature alone.
+Experimental layer streaming and optimization components remain research paths.
+They should not be interpreted as universal support for streaming arbitrary
+Hugging Face models or as validated improvements over tuned baselines.
 
-MOLT includes a benchmark suite ([Benchmark 001](docs/benchmarking.md)) evaluated on an **NVIDIA GeForce RTX 4060 Laptop GPU (8GB VRAM, 100W TGP)** training on 1,000,000 tokens:
+## Readiness, performance, and safety
 
-| Runtime / Configuration | Wall Speed | Active Compute | Mean Power | Peak Temp | Peak VRAM | Wh / 1M Tokens | Convergence (Val PPL) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **MOLT (Thermal ON - Dual-Gear)** | **`1,376.7 tok/s`** | **`1,952.4 tok/s`** | **49.07 W** | **`80.0°C`** (72°C cruise) | **6.89 GB** (1.1GB safe) | **9.90 Wh** | **`6.325`** |
-| **MOLT (Thermal OFF - Continuous)**| **`1,924.1 tok/s`** | **`1,956.6 tok/s`** | **57.01 W** | 83.0°C | **6.92 GB** (1.1GB safe) | **8.23 Wh** | **`6.325`** |
-| **PEFT (Hugging Face Baseline)** | 1,070.9 tok/s | 1,071.0 tok/s | 49.42 W | **85.0°C** | **7.97 GB** (Near OOM) | 13.19 Wh | 5.926 |
-| **UNSLOTH (External Ref Baseline)**| **`3,027.8 tok/s`** | **`3,028.7 tok/s`** | 58.46 W | 78.0°C | 4.80 GB | **5.79 Wh** | 6.399 |
+MOLT distinguishes **installed dependencies**, **successful runtime checks**, and
+**validated training workloads**. They are not interchangeable.
 
-* **+28.6% faster wall throughput and +82.3% faster active compute** than standard Hugging Face PEFT.
-* **25.0% less electrical energy** consumed than PEFT.
-* The reported VRAM difference is workload-specific, not a guarantee against OOM.
-* **Reported numerical agreement for these runs only:** Validation loss between Thermal ON and Thermal OFF is identical to 5 decimal places (`1.84454`).
+- **Model fit is workload-dependent.** An 8B dependency-readiness flag does not
+  guarantee an 8B model fits in 8 GB of VRAM.
+- **Memory mapping is not zero-RAM.** Mapped pages, OS caches, batches, model
+  weights, and optimizer state still consume memory.
+- **Pacing is software control, not hardware protection.** It cannot guarantee
+  flat temperatures or prevent every throttle, OOM, or power shutdown.
+- **Checkpoints reduce recovery risk, not all data loss.** Unsaved steps can be
+  lost; checksums and atomic publication do not guarantee survival of every
+  filesystem or hardware failure.
+- **Optional tools may remain unavailable.** Liger and native MSVC/nvcc development
+  tooling are not required for every training path and are not included in the
+  default installer.
+- **Prioritized mode affects only MOLT.** Its temporary process priority is
+  restored after normal completion or a training exception. Batch geometry,
+  thermal settings, other applications, and Defender are not silently changed.
 
-> [!NOTE]
-> **Independent Repository Policy:** MOLT is an independent research project. External comparative engines (such as Unsloth) are referenced strictly as external baseline benchmarks and are **NOT** dependencies of MOLT. MOLT installs and runs completely independently.
+Historical measurements and methodology are retained in the
+[benchmarking guide](docs/benchmarking.md). Results with different validation
+quality are not proof of an equal-quality speed or energy advantage. This release
+does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-For full methodology and telemetry curves, see [docs/benchmarking.md](docs/benchmarking.md).
+The setup implementation passed 100 local tests and its small CUDA/compiled
+backward probes on the development laptop. Fresh-machine bootstrap and sustained
+workload behavior still require broader reproduction. The live CI badge above,
+not that historical count, represents the latest GitHub test status.
 
----
+## Update an existing installation
 
-## 📖 Documentation Directory
+From your existing checkout, with training stopped:
 
-* **[Installation Guide](docs/INSTALL.md)**: Prerequisites, PyTorch setup, and hardware verification.
-* **[CLI Reference](docs/cli.md)**: Command guide, flags, and workspace conventions.
-* **[Benchmarking Guide](docs/benchmarking.md)**: Empirical methodology, formulas, and telemetry logs.
-* **[Architecture Overview](docs/architecture.md)**: Internal subsystems, data flow, and telemetry contracts.
-* **[Developer Guide](docs/development.md)**: Contributing, test suites, and boundary enforcement.
+```bat
+git status
+git pull --ff-only origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
 
----
+If Git reports local changes or diverged history, resolve them before updating;
+do not force-reset your work. Setup does not delete model weights, datasets, or
+run artifacts. Back up important checkpoints before changing environments.
 
-## ⚖️ License
+Older MOLT versions could add Defender exclusions. These are not removed
+automatically because ownership cannot be inferred safely. Review unwanted
+entries manually in Windows Security; see the [0.9.1 release notes](docs/releases/0.9.1.md).
 
-MOLT is released under the [MIT License](LICENSE).
+## Documentation
 
-## Safe prioritized execution
+- [Installation and troubleshooting](docs/INSTALL.md)
+- [Command-line reference](docs/cli.md)
+- [Architecture](docs/architecture.md)
+- [Benchmark methodology](docs/benchmarking.md)
+- [Development guide](docs/development.md)
+- [Release notes](docs/releases/0.9.1.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
-`--mode-select prioritize` temporarily raises only MOLT process priority on supported Windows hosts, after dry-run checks and confirmation. Priority is restored on normal exit or a training exception. It does not suspend apps, add Defender exclusions, change batch geometry, or override thermal limits. PyTorch thread counts remain unchanged; configure CPU threading explicitly for your workload.
+## License and feedback
 
-Existing Defender exclusions created by older versions are not automatically removed: MOLT cannot identify which exclusions you intended to keep. Review Windows Security → Virus & threat protection → Manage settings → Exclusions and remove only entries you recognize as unwanted MOLT additions.
+MOLT is distributed under the [MIT License](LICENSE), which permits commercial
+use subject to its terms. Model weights, datasets, and dependencies retain their
+own licenses.
 
-Long QLoRA cooling pauses check temperature every 0.5 seconds, with the same policy in UI and JSON modes. Reports count actual elapsed cooling time, including sleep overshoot. Thermal protection acts at software checkpoints, not as an instantaneous hardware cutoff.
+Report reproducible bugs through [GitHub Issues](https://github.com/PraveenNimilka/MOLT/issues).
+Include the commit, Python/PyTorch versions, relevant configuration, and error
+traceback. Remove credentials, private data, and sensitive paths before sharing.
