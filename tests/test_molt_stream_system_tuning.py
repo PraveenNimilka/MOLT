@@ -89,25 +89,25 @@ def test_denied_priority_still_runs(monkeypatch):
             assert not changed
 
 
-def test_prioritized_dry_run_never_activates_host_tuning(monkeypatch, capsys):
+def test_prioritized_dry_run_never_activates_host_tuning(monkeypatch, capsys, smoke_config):
     def forbidden(*args, **kwargs):
         pytest.fail("Dry run activated host tuning")
     monkeypatch.setattr("molt_stream.cli.prioritized_execution", forbidden)
-    assert main(["--json", "train", "--config", "configs/molt-stream-smoke.json",
+    assert main(["--json", "train", "--config", str(smoke_config),
                  "--mode-select", "prioritize", "--dry-run"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "dry_run_success"
-    assert result["spec"] == load_spec("configs/molt-stream-smoke.json").to_dict()
+    assert result["spec"] == load_spec(smoke_config).to_dict()
 
 
-def test_cancelled_training_never_activates_tuning(monkeypatch, capsys):
+def test_cancelled_training_never_activates_tuning(monkeypatch, capsys, smoke_config):
     def forbidden(*args, **kwargs):
         pytest.fail("Cancelled training activated tuning")
     monkeypatch.setattr("molt_stream.cli.prioritized_execution", forbidden)
     monkeypatch.setattr("molt_stream.cli._verify_cuda_or_prompt_install", lambda *args: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *args: "n")
-    assert main(["--ui", "train", "--config", "configs/molt-stream-smoke.json",
+    assert main(["--ui", "train", "--config", str(smoke_config),
                  "--mode-select", "prioritize"]) == 0
     assert "cancelled" in capsys.readouterr().out
 

@@ -68,10 +68,10 @@ def test_cli_info_json(capsys):
     assert "python" in data
 
 
-def test_cli_train_dry_run(capsys):
+def test_cli_train_dry_run(capsys, smoke_config):
     ret = main([
         "--json", "train",
-        "--config", "configs/molt-stream-smoke.json",
+        "--config", str(smoke_config),
         "--profile", "balanced",
         "--dry-run",
     ])
@@ -90,6 +90,15 @@ def test_cli_config_list(capsys):
     assert "models" in data
     assert "datasets" in data
     assert "profiles" in data
+
+
+def test_cli_dry_run_rejects_missing_dataset(capsys, smoke_config):
+    config = json.loads(smoke_config.read_text("utf-8"))
+    missing = smoke_config.parent / "missing.bin"
+    config["data"]["path"] = str(missing)
+    smoke_config.write_text(json.dumps(config), encoding="utf-8")
+    assert main(["--json", "train", "--config", str(smoke_config), "--dry-run"]) == 1
+    assert "missing.bin" in capsys.readouterr().err
 
 
 def test_cli_benchmark_smoke_execution():
