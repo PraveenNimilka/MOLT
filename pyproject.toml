@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0"]
-windows-fusion = ["triton-windows>=3.4,<3.5"]
+windows-fusion = ["torch==2.8.0", "triton-windows>=3.4,<3.5; sys_platform == 'win32'"]
 qlora = [
   "accelerate>=1.10,<2",
   "bitsandbytes>=0.48,<1",
@@ -47,6 +47,7 @@ exclude = [
   "/.c",
   "/.pytest_cache",
   "/.venv",
+  "/.tools",
   "/artifacts",
   "/data/prepared",
   "/dist",

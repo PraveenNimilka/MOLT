@@ -18,19 +18,18 @@
 git clone https://github.com/PraveenNimilka/MOLT.git
 cd MOLT
 
-# 1. Install PyTorch with NVIDIA CUDA acceleration (Windows)
-pip install torch --index-url https://download.pytorch.org/whl/cu128
-
-# 2. Install MOLT
-pip install -e .
+# Install locked CUDA, QLoRA, and Windows Triton dependencies; verify runtime
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
-With `uv`, use `uv sync --locked` and `uv run molt`. Add `--extra qlora` to sync when fine-tuning. The repository config selects the CUDA wheel index.
+Setup uses an isolated `.venv` and installs uv locally if needed. It does not install
+drivers or optional MSVC/Liger tooling. See [installation details](docs/INSTALL.md)
+for download requirements, `-EagerOnly`, and the limits of the runtime checks.
 
 
 ### 2. Launch Guided Training
-Simply type:
+From the repository folder:
 ```powershell
-molt
+.\.venv\Scripts\molt.exe
 ```
 MOLT automatically detects your GPU, discovers local models and datasets, and guides you through training:
 

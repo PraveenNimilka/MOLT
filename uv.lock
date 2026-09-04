@@ -269,7 +269,8 @@ qlora = [
     { name = "transformers" },
 ]
 windows-fusion = [
-    { name = "triton-windows" },
+    { name = "torch" },
+    { name = "triton-windows", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -287,8 +288,9 @@ requires-dist = [
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.0" },
     { name = "torch", specifier = ">=2.4.0", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "torch", marker = "extra == 'windows-fusion'", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "transformers", marker = "extra == 'qlora'", specifier = ">=5,<6" },
-    { name = "triton-windows", marker = "extra == 'windows-fusion'", specifier = ">=3.4,<3.5" },
+    { name = "triton-windows", marker = "sys_platform == 'win32' and extra == 'windows-fusion'", specifier = ">=3.4,<3.5" },
 ]
 provides-extras = ["dev", "windows-fusion", "qlora"]
 
