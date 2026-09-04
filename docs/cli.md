@@ -24,7 +24,7 @@ MOLT inspects your hardware and displays an interactive landing menu:
 Select an action:
   1. Train             Start a new training run
   2. Resume            Resume from a verified checkpoint
-  3. Benchmark         Run a 2-second hardware smoke test
+  3. Benchmark         Run a synthetic hardware smoke test
   4. Hardware Info     Inspect GPU, VRAM, and thermal sensors
   5. Configuration     Initialize workspace and list assets
   6. Exit

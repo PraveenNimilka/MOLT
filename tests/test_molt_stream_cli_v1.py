@@ -114,15 +114,44 @@ def test_cli_dry_run_rejects_missing_dataset(capsys, smoke_config):
     assert "missing.bin" in capsys.readouterr().err
 
 
-def test_cli_benchmark_smoke_execution():
+def test_cli_benchmark_smoke_execution(tmp_path, monkeypatch):
     import torch
 
-    smoke_data = Path("data/prepared/smoke/train.bin")
-    if not torch.cuda.is_available() or torch.cuda.device_count() == 0 or not smoke_data.exists():
-        pytest.skip("CUDA device and prepared smoke dataset required for physical smoke benchmark")
+    if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+        pytest.skip("CUDA device required for physical smoke benchmark")
+    monkeypatch.chdir(tmp_path)
 
     ret = main(["--json", "benchmark", "--smoke"])
     assert ret == 0
+
+
+@pytest.mark.parametrize("state,expected", [("completed", 0), ("thermal_abort", 1)])
+def test_guided_smoke_is_self_contained(tmp_path, monkeypatch, capsys, state, expected):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda *args: "3")
+    def fake_train(spec, **kwargs):
+        spec.validate()
+        assert spec.max_steps == 20
+        assert Path(spec.data.path).read_bytes() != Path(spec.data.validation_path).read_bytes()
+        root = Path(spec.artifacts_dir)
+        root.mkdir()
+        (root / "metrics.summary.json").write_text(json.dumps({
+            "state": state, "session_tokens": 5120, "telemetry": {"gpu_board_energy_joules": None}
+        }), encoding="utf-8")
+        return root
+    monkeypatch.setattr("molt_stream.training.engine.train", fake_train)
+    assert main(["--ui"]) == expected
+    output = capsys.readouterr().out
+    assert ("INCOMPLETE" if expected else "PASS") in output
+    assert "Unavailable" in output
+
+
+def test_guided_errors_use_normal_error_handler(monkeypatch, capsys):
+    def failed_menu(ui):
+        raise FileNotFoundError("example missing file")
+    monkeypatch.setattr("molt_stream.cli.guided_landing", failed_menu)
+    assert main(["--ui"]) == 1
+    assert "example missing file" in capsys.readouterr().out
 
 
 def test_unsloth_strictly_excluded_from_repository_and_dependencies():

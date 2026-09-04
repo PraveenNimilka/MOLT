@@ -703,22 +703,8 @@ def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: 
                 ("Batch", "8"),
                 ("Device", "CUDA"),
             ])
-        smoke_config = Path("configs/molt-stream-smoke.json")
-        if smoke_config.exists():
-            spec = load_spec(smoke_config)
-        else:
-            spec = TrainingSpec(
-                mode="pretrain",
-                data=DataSpec(path="data/prepared/smoke/train.bin", context_length=32, storage_dtype="uint8"),
-                model=ModelSpec(context_length=32, layers=2, width=128, heads=4, hidden_width=384, vocab_size=256),
-                stream=StreamSpec(device="cuda", compute_dtype="bfloat16"),
-                batch_size=8,
-                gradient_accumulation=1,
-                max_steps=20,
-                learning_rate=0.001,
-                seed=1337,
-                artifacts_dir="artifacts/molt-stream/runs",
-            )
+        from molt_stream.training.smoke import create_smoke_spec
+        spec = create_smoke_spec(Path("artifacts/molt-stream/smoke"))
         t0 = time.perf_counter()
         res = train(spec, progress=ui.progress if ui.enabled else None)
         ui.finish_progress()
@@ -727,14 +713,17 @@ def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: 
         summary = json.loads(summary_path.read_text("utf-8"))
         rate = summary.get("session_tokens", 0) / duration if duration else 0.0
         rows = [
-            ("State", "PASS"),
+            ("State", "PASS" if summary.get("state") == "completed" else "INCOMPLETE"),
+            ("Workload", "Synthetic random tokens; not a model-quality benchmark"),
+            ("Run", str(res)),
             ("Duration", f"{duration:.2f}s"),
             ("Throughput", f"{rate:,.1f} tok/s"),
             ("Peak VRAM", _bytes(summary.get("cuda_peak_allocated_bytes"))),
-            ("Board Energy", f"{summary.get('telemetry', {}).get('gpu_board_energy_joules', 0.0):.2f} J"),
+            ("Board Energy", f"{summary['telemetry']['gpu_board_energy_joules']:.2f} J"
+             if summary.get("telemetry", {}).get("gpu_board_energy_joules") is not None else "Unavailable"),
         ]
         output_func(summary, title="Benchmark Result", rows=rows)
-        return 0
+        return 0 if summary.get("state") == "completed" else 1
 
     spec = load_spec(args.config)
     value = benchmark_stream_throughput(spec, warmup_steps=args.warmup_steps, steps=args.steps)
@@ -763,7 +752,7 @@ def guided_landing(ui: TerminalUI) -> int:
     print(ui._style("\nSelect an action:", ui.BOLD))
     print(ui._style("  1. Train", ui.WHITE) + "             Start a new training run")
     print(ui._style("  2. Resume", ui.WHITE) + "            Resume from a verified checkpoint")
-    print(ui._style("  3. Benchmark", ui.WHITE) + "         Run a 2-second hardware smoke test")
+    print(ui._style("  3. Benchmark", ui.WHITE) + "         Run a synthetic hardware smoke test")
     print(ui._style("  4. Hardware Info", ui.WHITE) + "     Inspect GPU, VRAM, and thermal sensors")
     print(ui._style("  5. Configuration", ui.WHITE) + "     Initialize workspace and list assets")
     print(ui._style("  6. Exit", ui.MUTED))
@@ -825,11 +814,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _print(value)
 
-    # Bare molt invocation: show landing menu
-    if args.command is None:
-        return guided_landing(ui)
-
     try:
+        # Guided actions share the same error boundary as explicit commands.
+        if args.command is None:
+            return guided_landing(ui)
         if args.command == "info":
             return handle_info(ui, output)
         elif args.command == "config":
