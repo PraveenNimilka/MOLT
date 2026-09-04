@@ -59,6 +59,19 @@ def test_profile_mappings_and_application():
     assert speed_spec.thermal_pause_seconds == 0.05
 
 
+@pytest.mark.parametrize("output_mode", ["--json", "--ui"])
+def test_cli_inspect_runs_real_capability_probe(capsys, output_mode):
+    assert main([output_mode, "inspect"]) == 0
+    captured = capsys.readouterr()
+    if output_mode == "--json":
+        result = json.loads(captured.out)
+        assert "cuda_available" in result
+        assert "python" in result
+    else:
+        assert "Workspace info" in captured.out
+    assert "ImportError" not in captured.out + captured.err
+
+
 def test_cli_info_json(capsys):
     ret = main(["--json", "info"])
     assert ret == 0

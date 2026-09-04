@@ -835,7 +835,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "config":
             return handle_config(args, ui, output)
         elif args.command == "inspect":
-            from molt_stream.training.throughput import inspect_capabilities
+            from molt_stream.training.stream_benchmark import inspect_capabilities
             value = inspect_capabilities()
             output(value, title="Workspace info", rows=[(k, v) for k, v in value.items()])
         elif args.command == "prepare":
