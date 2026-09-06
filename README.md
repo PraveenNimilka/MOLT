@@ -4,7 +4,7 @@
 
 [![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.11.0-alpha.1.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.11.0-alpha.2.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 [![PyPI publishing](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml)
 
@@ -17,7 +17,7 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.11.0a1 · Source-available research alpha.** Suitable for evaluation and
+**Current release: 0.11.0a2 · Source-available research alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
@@ -38,10 +38,10 @@ seed; it is not a competitor benchmark.
 | 30-minute-per-arm AB/BA comparison | **Pending** |
 | General performance or novelty claim | **Not established** |
 
-The supplied `+37%` MOLT-versus-Unsloth aggregate is not present in the repository's
-raw artifact registry and is therefore not published as verified. See the
-[technical report](docs/research/hardware-constrained-peft-report.md) and run the
-[single-seed protocol screen](#reproduce-the-iso-clock-screen) to generate new evidence.
+MOLT does not currently publish a verified performance advantage over Unsloth.
+See the [technical report](docs/research/hardware-constrained-peft-report.md) and
+run the [single-seed protocol screen](#reproduce-the-iso-clock-screen) to generate
+new evidence toward the pending comparison gate.
 
 ## Install
 
@@ -85,7 +85,7 @@ first; otherwise pip can resolve the CPU-only wheel on Windows:
 
 ```powershell
 py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-py -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a1"
+py -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a2"
 ```
 
 Then verify the active Python environment and CUDA runtime:
@@ -98,7 +98,7 @@ For a reproducible source checkout, install the signed release tag rather than
 an unversioned branch:
 
 ```powershell
-py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.11.0-alpha.1"
+py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.11.0-alpha.2"
 ```
 
 Maintainer publishing and supply-chain instructions are in
@@ -301,7 +301,7 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-See the [release verification notes](docs/releases/0.11.0-alpha.1.md) for automated tests
+See the [release verification notes](docs/releases/0.11.0-alpha.2.md) for automated tests
 and physical runtime checks. Fresh-machine bootstrap and sustained workload
 behavior still require broader reproduction. The live CI badge represents the
 latest GitHub test status.
@@ -332,7 +332,7 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
 - [Technical report](docs/research/hardware-constrained-peft-report.md)
-- [Release notes](docs/releases/0.11.0-alpha.1.md)
+- [Release notes](docs/releases/0.11.0-alpha.2.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

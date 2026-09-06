@@ -19,8 +19,8 @@ Unsloth, and other dependencies are separate works under their own terms.
 Repository revisions through commit `a612b40734258b6ee0f1bea5777c7659a352dbee`
 and the `moltengine` distributions already published as `0.10.0a1` were offered
 under MIT. Those existing grants are not revoked by relicensing later work. The
-historical MIT text is retained at [`LICENSES/MIT-legacy.txt`](../LICENSES/MIT-legacy.txt)
-for clarity.
+historical license remains available in those immutable Git revisions and PyPI
+distribution files; it is not a license for current source.
 
 ## Commercial and competing use
 

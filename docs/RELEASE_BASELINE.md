@@ -13,7 +13,7 @@
 * **Operating System:** Windows 11 Build 26200
 * **Python Runtime:** Python `3.12.13` (64-bit)
 * **Package Name:** `moltengine`
-* **Package Version:** `0.11.0a1` (from `pyproject.toml`)
+* **Package Version:** `0.11.0a2` (from `pyproject.toml`)
 * **Console Entry Point:** `molt = "molt_stream.cli:main"`
 
 ### Installed Runtime Dependencies `[MEASURED]`

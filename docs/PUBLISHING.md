@@ -33,7 +33,7 @@ API token to the repository or GitHub Actions configuration.
 6. Verify the GitHub `publish` workflow, PyPI file hashes, and a clean-environment
    installation before announcing the release.
 
-For `0.11.0a1`, the workflow may instead be started once from
+For `0.11.0a2`, the workflow may instead be started once from
 **Actions → publish → Run workflow** after the trusted publisher is verified.
 PyPI versions are immutable: never reuse a version after it has been uploaded.
 

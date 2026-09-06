@@ -1,8 +1,8 @@
 # Public launch draft — do not post until the comparison gate passes
 
-The requested headline claiming a 37% Unsloth victory is intentionally withheld:
-the repository does not contain the corresponding three-seed raw artifacts.
-Use the copy below for the current evidence level.
+An Unsloth victory headline is intentionally withheld because the repository
+does not contain the corresponding three-seed raw artifacts. Use the copy below
+for the current evidence level.
 
 ## Reddit / r/LocalLLaMA
 
