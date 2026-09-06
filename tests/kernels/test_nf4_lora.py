@@ -42,6 +42,8 @@ def test_scheduled_nf4_lora_matches_peft_dataflow() -> None:
 
 
 def test_scheduled_nf4_lora_refuses_cpu() -> None:
+    pytest.importorskip("bitsandbytes")
+
     class QuantState:
         pass
 
@@ -54,6 +56,8 @@ def test_scheduled_nf4_lora_refuses_cpu() -> None:
 
 
 def test_module_suffix_filter_refuses_when_no_compatible_projection() -> None:
+    pytest.importorskip("bitsandbytes")
+    pytest.importorskip("peft")
     with pytest.raises(Exception, match="down_proj"):
         enable_scheduled_nf4_lora(
             torch.nn.Sequential(torch.nn.Linear(4, 4)),

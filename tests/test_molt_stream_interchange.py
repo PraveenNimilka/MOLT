@@ -43,6 +43,7 @@ def test_jsonl_invalid_schema_is_actionable(tmp_path):
 
 
 def test_qlora_export_writes_standard_safetensors_adapter(tmp_path):
+    pytest.importorskip("safetensors.torch")
     from safetensors.torch import load_file
     from molt_stream.experiments.export import export_run
     from molt_stream.experiments.store import AtomicCheckpointStore
