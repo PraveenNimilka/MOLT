@@ -31,6 +31,7 @@ qlora = [
   "peft>=0.17,<1",
   "transformers>=5,<6",
 ]
+data = ["pyarrow>=19,<24"]
 
 [project.scripts]
 molt = "molt_stream.cli:main"

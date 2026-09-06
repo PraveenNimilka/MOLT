@@ -5,6 +5,7 @@ hypotheses and operational failures would have a durable home.
 
 | Date | Experiment | Outcome | Evidence | Decision |
 |---|---|---|---|---|
+| 2026-09-06 | Qwen2.5-1.5B midpoint intra-step synchronization (all 28 layers, boundary 14, 10 ms, B1/G4, context 512) | Exact final NLL was preserved (1.533068), but compute fell from 1,710 to 1,566 tok/s, end-to-end fell from 613 to 492 tok/s, peak temperature still reached 72 C, and one 1,536-token partial microbatch was rolled back. | `artifacts/mars-1p5b-20260904/intra-step-10ms-screen/20260906-103011-qlora-b80df5cc/metrics.summary.json` | Reject as a performance default. Retain only as an opt-in exact-math safety checkpoint; test a verified hardware operating point instead. |
 | 2026-09-01 | Environment audit | Python/ML framework absent; no baseline runnable | Hardware audit | Remain at Milestone 0; specify environment prerequisite |
 | 2026-09-01 | EXP-1002 | Direct BF16 SGD at lr 1e-4 stagnated: 8.5654→8.5629 B/B over 256 steps | Raw run artifacts | Reject low-rate configuration |
 | 2026-09-01 | EXP-1004 | Error feedback improved sample efficiency but achieved only 1.36× interpolated time-to-quality, added ~2.08 GB, and nearly doubled energy | Controlled EXP-1003 comparison | Reject promotion; retain prior-art mechanism |
@@ -23,6 +24,9 @@ hypotheses and operational failures would have a durable home.
 | 2026-09-01 | EXP-1023 grouped K=4 streaming | Three paired 60-update runs changed throughput by -11.77%, +4.11%, and +4.11% (median +4.11%); energy was mixed. A shorter run's +10.50% did not reproduce. | `stream-tune-20260901-153044.json` through `stream-tune-20260901-153056.json` | Keep experimental; reject the required >=10% speedup claim. |
 | 2026-09-01 | Windows max-autotune/native fusion | Optional Triton-Windows made no-graph fusion operational and cut incremental forward/backward allocation 14.37%, but the required 40% failed. Graph-enabled max-autotune crashes in the Windows static launcher; native MSVC/nvcc tools remain absent. | `artifacts/molt-stream/benchmarks/fusion-memory-20260901-154400.json` | Retain no-graph backend as experimental; reject graph and 40% claims. |
 | 2026-09-01 | Production geometry thermal acceptance | The 10.78M context-512/batch-24 eager profile measured 127,854 and 128,520 tokens/s in short windows, while compiled no-graph briefly measured 175,256; all crossed 70 C and auto-aborted (71 C, 72 C, and 74 C peaks). | `production-throughput-20260901-153318.json`, `production-throughput-20260901-153335.json`, `production-throughput-20260901-154457.json` | Throughput arithmetic passes for this small model; commercial reliability and thermal gate fail. |
+| 2026-09-06 | All-layer Qwen2.5-1.5B CPU activation offload | Exact pinned-host saved tensors reduced CUDA allocation to 2.635 GiB but reached only 502 compute tok/s and 6.50 GiB process RSS. | `artifacts/mars-1p5b-20260904/activation-offload/20260906-082436-qlora-51ad49df` | Reject: PCIe traffic and host memory are worse than recomputation. |
+| 2026-09-06 | Packed INT4 saved activations | Short arms approached the memory gate with matching early NLL, but packing hundreds of tensors reduced compute and an endurance arm grew to 3.97 GiB before thermal stop. | `artifacts/mars-1p5b-20260904/int4-activations/` | Keep experimental only; investigate lifetime and long-run allocation before any promotion. |
+| 2026-09-06 | Exact BF16 RMSNorm + stride-8 endurance | The short arm measured 1,727 compute tok/s at 2.956 GiB, but the 16-step arm completed only 15 steps after ten recoveries, sustained 401 end-to-end tok/s and peaked at 73 C. | `artifacts/mars-1p5b-20260904/bf16-rms-stride8/20260906-085632-qlora-48217507` | Reject production promotion. The 1,200 end-to-end thermal gate remains open. |
 | 2026-09-01 | EXP-1026 60 C duty cycling at requested cool geometry | The laptop rejected the 65 W NVML request and remained at 115 W. With batch 16/accumulation 2, twelve 30-50 ms pauses could not prevent a 74 C peak; the run aborted after 8/30 measured steps at 115,173 tokens/s. | `artifacts/molt-stream/benchmarks/production-throughput-20260901-181655.json` | Reject the claim that 40 ms sleeps lock temperature at 60 C. Do not spend energy on the preregistered 500-step run. |
 | 2026-09-01 | EXP-1027 predictive thermal cruise | Two compiled batch-32 probes reached 73-74 C during max-autotune/warm-up and aborted before a valid interval. Eager controller variants completed, but late/early throughput ratios were 0.881, 0.798, 0.945, 0.576 and 0.586; none passed the preregistered 0.97 stability gate. The best short safe interval was 103,858 tokens/s, peak 64 C, no throttle, ratio 0.945. | `production-throughput-20260901-203016.json` through `production-throughput-20260901-223807.json` | Retain controller instrumentation and safety fixes, but reject promotion as a solved cruise profile. Compilation heat and long thermal soak remain blockers. |
 | 2026-09-01 | EXP-1027-C 35 W conservative frontier point | The 40-warm-up/100-step run had not completed after more than 240 seconds and was manually interrupted under the cheap-kill rule. Atomic result output was therefore never published. | Console record; config `configs/molt-stream-sustainable-35w.json` | Unverified and not production-ready. Add bounded benchmark timeout/progress before repeating. |
@@ -36,6 +40,60 @@ hypotheses and operational failures would have a durable home.
 | 2026-09-02 | EXP-1035 ratio-14 medium horizon | At context 256 the candidate improved to NLL 2.105 at step 5 but rebounded to 2.153 at step 10, 5.15% worse than the completed 20-update vanilla reference. The contemporaneous vanilla control thermally aborted at step 6 after a 78 C heat-soaked peak, so no paired time/energy result is valid. | Candidate `artifacts/qwen2-0.5b/loraplus-medium-horizon-runs/20260902-200504-qlora-b3c18415`; aborted control `resident-activation-runs/20260902-200604-qlora-26e7abe1`; invalid comparison artifact `comparisons/loraplus-medium-horizon-kill-seed-1337.json` | Reject medium-horizon promotion. EXP-1032 is an early-quality transient only; stop further GPU trials until chassis state is normalized. |
 
 Entries are appended; they are not removed when a later revision succeeds.
+
+## 2026-09-06 — all-layer equilibrium and LoRA scheduling screens
+
+- Separating the predictive cruise target from a 70 C microbatch safety guard
+  did not stabilize a 50 W controller point: it stopped at 7/8 updates, peaked
+  at 73 C, and discarded 5,632 uncommitted tokens. The committed updates still
+  measured 1,712 tok/s, confirming that recovery churn—not the healthy update
+  path—caused the 597 end-to-end tok/s result.
+- A conservative 62 C cruise, 66 C microbatch guard, and 40 W average-power
+  pacing target completed 8/8 all-layer updates with no recovery or discarded
+  work. It reached the identical 1.533068 NLL and peaked at 70 C, but required
+  12.22 seconds of pacing and sustained only 624 end-to-end tok/s.
+- A packed NF4 backward schedule restricted to `down_proj` was rejected after
+  full-model compute fell from 1,636 to 1,464 tok/s despite a small isolated
+  component win.
+- The first full-checkpoint BF16-shadow run exposed a correctness defect: fused
+  AdamW did not advance the Python tensor version used for lazy shadow refresh,
+  leaving stale compute weights and regressing NLL to 1.608671. Explicit
+  post-step invalidation was added; the faulty run is invalid for performance
+  comparison and retained at `full-checkpoint-shadow-equilibrium/`.
+- Versioned BF16 LoRA compute shadows produced one 1,710 tok/s screen, but the
+  first temperature-normalized AB pair failed when the shadow arm stopped at
+  72 C without reaching the NLL target. The remaining pairs were killed because
+  an all-pairs promotion result was no longer possible.
+- Artifacts: `artifacts/mars-1p5b-20260904/equilibrium-screen/`,
+  `equilibrium-conservative-screen/`, and `lora-shadow-ab-20260906/`.
+- Decision: keep both scheduling mechanisms experimental. Retain the separated
+  microbatch guard as safety/control infrastructure; do not claim a sustained
+  Unsloth win.
+
+## 2026-09-06 — matched all-layer Unsloth thermal kill screens
+
+- A new matched runner uses Qwen2.5-1.5B, all 28 layers, 9,232,384 rank-8
+  all-linear adapter parameters, context 512, B1/G4, FP32 fused AdamW, identical
+  mmap token order, exact unfiltered cross-entropy, four validation windows and
+  the same 72 C boundary.
+- Unsloth stopped after 4 updates at 72 C under the 62/66 C controller, after 3
+  updates in a colder repeat, after 6 updates with a 30 W pacing target, and
+  after 2 updates with a 25 W target plus a 58 C microbatch guard. None reached
+  the registered 1.54 NLL target.
+- MOLT completed one normalized 8-update arm at 70 C and NLL 1.533068, but a
+  later heat-soaked automated pair stopped both engines. A five-second surface
+  temperature dwell was therefore rejected as insufficient chassis-state
+  normalization.
+- Full-checkpoint MOLT reached the same 1.533068 NLL at 1.944 GiB allocated and
+  2.803 GiB NVML board-used memory, but a delayed 72 C sample marked the run as
+  a thermal stop. The corrected adapter-shadow repeat also stopped and provided
+  no speed advantage.
+- The fused Triton-loss/BF16-RMS/stride-8 combination stopped after 5 updates at
+  74 C and was slower than the analytical-loss reference.
+- Decision: the short MOLT completion is a reliability screen, not an official
+  Unsloth victory. Require a long rolling-window thermal soak and a power/clock
+  operating point enforceable below the current 140 W ceiling before the
+  three-seed endurance protocol.
 
 # 2026-09-02 — EXP-1016 sequence-length warmup
 

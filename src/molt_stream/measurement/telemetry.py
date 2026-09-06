@@ -104,6 +104,23 @@ class NVMLTelemetry:
         self._thread = threading.Thread(target=self._sample, daemon=True, name="molt-nvml")
         self._thread.start()
 
+    def thermal_point(self) -> TelemetryPoint | None:
+        """Fresh temperature-only read for synchronous work-boundary guards.
+
+        Do not inject partial samples into the board-energy integration stream.
+        """
+        if self._nvml is None or self._handle is None:
+            return None
+        try:
+            temperature = float(self._nvml.nvmlDeviceGetTemperature(self._handle, 0))
+            return TelemetryPoint(time.perf_counter(), 0, None, None, temperature,
+                                  None, None, None)
+        except Exception as exc:
+            message = f"NVML thermal guard failed: {type(exc).__name__}: {exc}"
+            if message not in self.errors and len(self.errors) < 32:
+                self.errors.append(message)
+            return None
+
     def _sample(self) -> None:
         process = psutil.Process()
         psutil.cpu_percent(interval=None)

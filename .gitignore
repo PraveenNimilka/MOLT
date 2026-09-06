@@ -14,3 +14,4 @@ data/prepared/
 dist/
 *.tmp
 molt-workspace/
+unsloth_compiled_cache/

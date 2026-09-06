@@ -14,9 +14,13 @@ ModuleT = TypeVar("ModuleT", bound=nn.Module)
 def configure_windows_compiler_cache() -> Path:
     """Select a short deterministic path to avoid Win32 MAX_PATH failures."""
     root = Path(".c").resolve()
-    root.mkdir(parents=True, exist_ok=True)
+    inductor = root / "i"
+    triton = root / "t"
+    inductor.mkdir(parents=True, exist_ok=True)
+    triton.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("TRITON_HOME", str(root))
-    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(root / "inductor"))
+    os.environ.setdefault("TRITON_CACHE_DIR", str(triton))
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(inductor))
     return root
 
 

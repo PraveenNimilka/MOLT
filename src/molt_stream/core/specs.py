@@ -120,8 +120,30 @@ class TrainingSpec:
     base_model: str | None = None
     execution_backend: str = "eager"
     activation_checkpointing: bool = True
+    qlora_fused_optimizer: bool = False
+    qlora_autocast: bool = False
+    qlora_loss_chunk_size: int | None = None
+    qlora_loss_backend: str = "analytical"
+    qlora_attention_backend: str = "sdpa"
+    qlora_activation_offload: bool = False
+    qlora_activation_compression_bits: int | None = None
+    qlora_activation_compression_minimum_bytes: int = 1 << 20
+    qlora_checkpoint_stride: int = 1
+    qlora_precompute_head_gradient: bool = False
+    qlora_cache_frozen_head: bool = True
+    qlora_restore_tied_embedding_bf16: bool = False
+    qlora_frozen_rmsnorm_bf16: bool = False
+    qlora_scheduled_nf4_down_projection: bool = False
+    qlora_bf16_adapter_shadows: bool = False
+    qlora_validation_layer_guard: bool = False
+    qlora_intra_step_boundary_layer: int | None = None
+    qlora_intra_step_pause_ms: float = 0.0
+    qlora_train_last_layers: int | None = None
+    qlora_full_warmup_steps: int = 0
+    qlora_validation_batches: int = 4
     thermal_target_c: float = 60.0
     thermal_abort_c: float = 72.0
+    thermal_microbatch_guard_c: float | None = None
     thermal_pause_seconds: float = 0.04
     thermal_control_mode: str = "reactive"
     thermal_lookahead_seconds: float = 1.5
@@ -136,11 +158,142 @@ class TrainingSpec:
     thermal_protective_hysteresis_c: float = 2.0
     thermal_steady_pause_ms: float = 40.0
     power_limit_watts: float | None = None
+    thermal_recovery_mode: str = "stop"
+    thermal_recovery_c: float | None = None
+    thermal_max_recoveries: int = 3
 
     def validate(self) -> None:
         self.data.validate()
         self.model.validate()
         self.stream.validate()
+        if type(self.qlora_validation_batches) is not int or self.qlora_validation_batches < 1:
+            raise ValueError("qlora_validation_batches must be a positive integer")
+        if self.qlora_validation_batches != 4 and self.mode != TrainingMode.QLORA:
+            raise ValueError("qlora_validation_batches requires QLoRA")
+        if type(self.qlora_full_warmup_steps) is not int or self.qlora_full_warmup_steps < 0:
+            raise ValueError("qlora_full_warmup_steps must be a non-negative integer")
+        if self.qlora_full_warmup_steps and self.qlora_train_last_layers is None:
+            raise ValueError("qlora_full_warmup_steps requires qlora_train_last_layers")
+        if self.qlora_full_warmup_steps > self.max_steps:
+            raise ValueError("qlora_full_warmup_steps cannot exceed max_steps")
+        if self.qlora_train_last_layers is not None and (
+            type(self.qlora_train_last_layers) is not int or self.qlora_train_last_layers < 1
+        ):
+            raise ValueError("qlora_train_last_layers must be a positive integer")
+        if self.qlora_train_last_layers is not None and self.mode != TrainingMode.QLORA:
+            raise ValueError("qlora_train_last_layers requires QLoRA")
+        if type(self.qlora_validation_layer_guard) is not bool:
+            raise ValueError("qlora_validation_layer_guard must be a boolean")
+        if self.qlora_validation_layer_guard and self.mode != TrainingMode.QLORA:
+            raise ValueError("qlora_validation_layer_guard requires QLoRA")
+        if self.qlora_intra_step_boundary_layer is not None:
+            if (
+                type(self.qlora_intra_step_boundary_layer) is not int
+                or self.qlora_intra_step_boundary_layer < 1
+            ):
+                raise ValueError("qlora_intra_step_boundary_layer must be a positive integer")
+            if self.mode != TrainingMode.QLORA or self.stream.device != "cuda":
+                raise ValueError("intra-step layer thermal guarding requires QLoRA on CUDA")
+        if not 0.0 <= self.qlora_intra_step_pause_ms <= 100.0:
+            raise ValueError("qlora_intra_step_pause_ms must be between 0 and 100")
+        if self.qlora_intra_step_pause_ms and self.qlora_intra_step_boundary_layer is None:
+            raise ValueError("qlora_intra_step_pause_ms requires a boundary layer")
+        if type(self.qlora_precompute_head_gradient) is not bool:
+            raise ValueError("qlora_precompute_head_gradient must be a boolean")
+        if self.qlora_precompute_head_gradient and (
+            self.mode != TrainingMode.QLORA or self.qlora_loss_chunk_size is None
+        ):
+            raise ValueError("qlora_precompute_head_gradient requires partitioned QLoRA loss")
+        if type(self.qlora_cache_frozen_head) is not bool:
+            raise ValueError("qlora_cache_frozen_head must be a boolean")
+        if type(self.qlora_restore_tied_embedding_bf16) is not bool:
+            raise ValueError("qlora_restore_tied_embedding_bf16 must be a boolean")
+        if self.qlora_restore_tied_embedding_bf16 and (
+            self.mode != TrainingMode.QLORA or not self.qlora_autocast
+        ):
+            raise ValueError("BF16 tied embeddings require autocast QLoRA")
+        if self.qlora_frozen_rmsnorm_bf16 and (
+            self.mode != TrainingMode.QLORA or not self.qlora_autocast
+        ):
+            raise ValueError("BF16 frozen RMSNorm requires autocast QLoRA")
+        if self.qlora_scheduled_nf4_down_projection and (
+            self.mode != TrainingMode.QLORA
+            or self.stream.device != "cuda"
+            or not self.qlora_autocast
+        ):
+            raise ValueError(
+                "scheduled NF4 down projection requires autocast QLoRA on CUDA"
+            )
+        if self.qlora_bf16_adapter_shadows and (
+            self.mode != TrainingMode.QLORA
+            or self.stream.device != "cuda"
+            or not self.qlora_autocast
+        ):
+            raise ValueError("BF16 adapter shadows require autocast QLoRA on CUDA")
+        if self.qlora_bf16_adapter_shadows and self.qlora_scheduled_nf4_down_projection:
+            raise ValueError(
+                "BF16 adapter shadows and scheduled NF4 down projection are mutually exclusive"
+            )
+        if type(self.qlora_checkpoint_stride) is not int or self.qlora_checkpoint_stride < 1:
+            raise ValueError("qlora_checkpoint_stride must be a positive integer")
+        if self.qlora_checkpoint_stride != 1 and (
+            self.mode != TrainingMode.QLORA or not self.activation_checkpointing
+        ):
+            raise ValueError("qlora_checkpoint_stride requires QLoRA activation checkpointing")
+        if self.qlora_loss_chunk_size is not None:
+            if type(self.qlora_loss_chunk_size) is not int or self.qlora_loss_chunk_size <= 0:
+                raise ValueError("qlora_loss_chunk_size must be a positive integer")
+            if self.mode != TrainingMode.QLORA:
+                raise ValueError("qlora_loss_chunk_size requires QLoRA")
+        if self.qlora_loss_backend not in {"analytical", "triton", "auto"}:
+            raise ValueError("qlora_loss_backend must be analytical, triton, or auto")
+        if self.qlora_loss_backend != "analytical" and not self.qlora_precompute_head_gradient:
+            raise ValueError(
+                "non-analytical qlora_loss_backend requires qlora_precompute_head_gradient"
+            )
+        if self.qlora_attention_backend not in {"sdpa", "eager"}:
+            raise ValueError("qlora_attention_backend must be sdpa or eager")
+        if self.qlora_attention_backend != "sdpa" and self.mode != TrainingMode.QLORA:
+            raise ValueError("qlora_attention_backend requires QLoRA")
+        if type(self.qlora_activation_offload) is not bool:
+            raise ValueError("qlora_activation_offload must be a boolean")
+        if self.qlora_activation_offload and (
+            self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
+        ):
+            raise ValueError("qlora_activation_offload requires QLoRA on CUDA")
+        if self.qlora_activation_offload and self.activation_checkpointing:
+            raise ValueError(
+                "qlora_activation_offload and activation_checkpointing are mutually exclusive"
+            )
+        if self.qlora_activation_compression_bits not in {None, 4}:
+            raise ValueError("qlora_activation_compression_bits must be null or 4")
+        if self.qlora_activation_compression_bits is not None and (
+            self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
+        ):
+            raise ValueError("QLoRA activation compression requires QLoRA on CUDA")
+        if self.qlora_activation_compression_bits is not None and (
+            self.activation_checkpointing or self.qlora_activation_offload
+        ):
+            raise ValueError(
+                "QLoRA activation compression excludes checkpointing and CPU activation offload"
+            )
+        if (
+            type(self.qlora_activation_compression_minimum_bytes) is not int
+            or self.qlora_activation_compression_minimum_bytes < 0
+        ):
+            raise ValueError("QLoRA activation compression minimum bytes must be non-negative")
+        if not isinstance(self.qlora_fused_optimizer, bool):
+            raise ValueError("qlora_fused_optimizer must be a boolean")
+        if self.qlora_fused_optimizer and (
+            self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
+        ):
+            raise ValueError("qlora_fused_optimizer requires QLoRA on CUDA")
+        if not isinstance(self.qlora_autocast, bool):
+            raise ValueError("qlora_autocast must be a boolean")
+        if self.qlora_autocast and (
+            self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
+        ):
+            raise ValueError("qlora_autocast requires QLoRA on CUDA")
         if self.mode == TrainingMode.PRETRAIN and self.data.context_length != self.model.context_length:
             raise ValueError("data and model context lengths must match for pretraining")
         if min(self.batch_size, self.gradient_accumulation, self.max_steps) <= 0:
@@ -156,8 +309,26 @@ class TrainingSpec:
                 "execution_backend must be eager, compile-max-autotune, or "
                 "compile-max-autotune-no-cudagraphs"
             )
+        if self.mode == TrainingMode.QLORA and self.execution_backend != "eager":
+            raise ValueError(
+                "compiled execution backends are not yet checkpoint-safe for QLoRA; "
+                "use eager rather than silently running an uncompiled model"
+            )
         if not (0 < self.thermal_target_c < self.thermal_abort_c):
             raise ValueError("thermal_target_c must be positive and below thermal_abort_c")
+        microbatch_guard_c = self.thermal_microbatch_guard_c or self.thermal_target_c
+        if not self.thermal_target_c <= microbatch_guard_c < self.thermal_abort_c:
+            raise ValueError(
+                "thermal_microbatch_guard_c must be at or above thermal_target_c "
+                "and below thermal_abort_c"
+            )
+        if self.thermal_recovery_mode not in {"stop", "cool-and-continue"}:
+            raise ValueError("thermal_recovery_mode must be stop or cool-and-continue")
+        recovery_c = self.thermal_recovery_c or self.thermal_target_c
+        if not 0 < recovery_c < self.thermal_abort_c:
+            raise ValueError("thermal_recovery_c must be below thermal_abort_c")
+        if type(self.thermal_max_recoveries) is not int or self.thermal_max_recoveries < 0:
+            raise ValueError("thermal_max_recoveries must be a non-negative integer")
         if self.thermal_control_mode in ("dual-gear", "intercooler"):
             if not 0.05 <= self.thermal_pause_seconds <= 30.0:
                 raise ValueError("dual-gear thermal_pause_seconds must be between 0.05 and 30.0")
@@ -217,6 +388,10 @@ class TrainingSpec:
             raise ValueError(
                 "unknown training configuration field(s): " + ", ".join(unknown_fields)
             )
+        if not isinstance(value.get("qlora_fused_optimizer", False), bool):
+            raise ValueError("qlora_fused_optimizer must be a boolean")
+        if not isinstance(value.get("qlora_autocast", False), bool):
+            raise ValueError("qlora_autocast must be a boolean")
         data_value = dict(value["data"])
         data_value["path"] = _expand_config_path(str(data_value["path"]), "data.path")
         if data_value.get("validation_path") is not None:
@@ -244,8 +419,39 @@ class TrainingSpec:
             base_model=base_model,
             execution_backend=str(value.get("execution_backend", "eager")),
             activation_checkpointing=bool(value.get("activation_checkpointing", True)),
+            qlora_fused_optimizer=value.get("qlora_fused_optimizer", False),
+            qlora_autocast=value.get("qlora_autocast", False),
+            qlora_loss_chunk_size=value.get("qlora_loss_chunk_size"),
+            qlora_loss_backend=str(value.get("qlora_loss_backend", "analytical")),
+            qlora_attention_backend=str(value.get("qlora_attention_backend", "sdpa")),
+            qlora_activation_offload=value.get("qlora_activation_offload", False),
+            qlora_activation_compression_bits=value.get("qlora_activation_compression_bits"),
+            qlora_activation_compression_minimum_bytes=value.get(
+                "qlora_activation_compression_minimum_bytes", 1 << 20
+            ),
+            qlora_checkpoint_stride=value.get("qlora_checkpoint_stride", 1),
+            qlora_precompute_head_gradient=value.get("qlora_precompute_head_gradient", False),
+            qlora_cache_frozen_head=value.get("qlora_cache_frozen_head", True),
+            qlora_restore_tied_embedding_bf16=value.get(
+                "qlora_restore_tied_embedding_bf16", False
+            ),
+            qlora_frozen_rmsnorm_bf16=value.get("qlora_frozen_rmsnorm_bf16", False),
+            qlora_scheduled_nf4_down_projection=value.get(
+                "qlora_scheduled_nf4_down_projection", False
+            ),
+            qlora_bf16_adapter_shadows=value.get("qlora_bf16_adapter_shadows", False),
+            qlora_validation_layer_guard=value.get("qlora_validation_layer_guard", False),
+            qlora_intra_step_boundary_layer=value.get("qlora_intra_step_boundary_layer"),
+            qlora_intra_step_pause_ms=float(value.get("qlora_intra_step_pause_ms", 0.0)),
+            qlora_train_last_layers=value.get("qlora_train_last_layers"),
+            qlora_full_warmup_steps=value.get("qlora_full_warmup_steps", 0),
+            qlora_validation_batches=value.get("qlora_validation_batches", 4),
             thermal_target_c=float(value.get("thermal_target_c", 60.0)),
             thermal_abort_c=float(value.get("thermal_abort_c", 72.0)),
+            thermal_microbatch_guard_c=(
+                float(value["thermal_microbatch_guard_c"])
+                if value.get("thermal_microbatch_guard_c") is not None else None
+            ),
             thermal_pause_seconds=float(value.get("thermal_pause_seconds", 0.04)),
             thermal_control_mode=str(value.get("thermal_control_mode", "reactive")),
             thermal_lookahead_seconds=float(value.get("thermal_lookahead_seconds", 1.5)),
@@ -273,6 +479,12 @@ class TrainingSpec:
                 float(value["power_limit_watts"])
                 if value.get("power_limit_watts") is not None else None
             ),
+            thermal_recovery_mode=str(value.get("thermal_recovery_mode", "stop")),
+            thermal_recovery_c=(
+                float(value["thermal_recovery_c"])
+                if value.get("thermal_recovery_c") is not None else None
+            ),
+            thermal_max_recoveries=value.get("thermal_max_recoveries", 3),
         )
 
 

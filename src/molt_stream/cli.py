@@ -259,9 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("runs", help="List saved runs and verified checkpoint status")
     fit = commands.add_parser("fit-test", help="Run two optimizer steps at configured geometry; not a sustained benchmark")
     fit.add_argument("--config", required=True)
-    export = commands.add_parser("export", help="Export a verified MOLT bundle, excluding base weights and data")
+    export = commands.add_parser("export", help="Export a verified run as a MOLT bundle, PEFT adapter, or GGUF adapter")
     export.add_argument("--run", required=True)
-    export.add_argument("--output-dir", required=True)
+    export.add_argument("--output", "--output-dir", dest="output_dir", required=True)
+    export.add_argument("--format", choices=("auto", "molt", "hf", "gguf"), default="auto")
+    export.add_argument("--llama-cpp", help="llama.cpp checkout containing convert_lora_to_gguf.py (GGUF only)")
 
     # 1. info
     commands.add_parser("info", help="Display hardware diagnostics, VRAM, and suggested profiles")
@@ -275,13 +277,21 @@ def build_parser() -> argparse.ArgumentParser:
     config_cmd.add_argument("--list", action="store_true", help="List discovered models, datasets, and configurations")
 
     # 4. prepare
-    prepare = commands.add_parser("prepare", help="Validate an mmap-ready token file")
+    prepare = commands.add_parser("prepare", help="Prepare text, JSONL, or Parquet as an mmap token dataset")
+    prepare.add_argument("source", nargs="?", help="Input .txt, .jsonl, or .parquet file")
     prepare.add_argument("--config", help="Validate an existing binary dataset configuration")
-    prepare.add_argument("--text-file", help="Tokenize local UTF-8 text into a new dataset directory")
+    prepare.add_argument("--text-file", help="Legacy alias for the source text path")
+    prepare.add_argument("--model", help="Local model directory; supplies tokenizer and emits a starter config")
     prepare.add_argument("--tokenizer", help="Local tokenizer/model directory")
     prepare.add_argument("--base-model", help="Local base model; also emit a starter QLoRA training config")
-    prepare.add_argument("--output-dir", help="New output directory; existing directories are never overwritten")
+    prepare.add_argument("--output", dest="output_dir", help="New output directory (alias: --output-dir)")
+    prepare.add_argument("--output-dir", dest="output_dir", help="New output directory; never overwritten")
     prepare.add_argument("--validation-fraction", type=float, default=0.1)
+    prepare.add_argument("--schema", choices=("auto", "text", "messages", "prompt-completion"), default="auto")
+    prepare.add_argument("--text-column", default="text")
+    prepare.add_argument("--messages-column", default="messages")
+    prepare.add_argument("--prompt-column", default="prompt")
+    prepare.add_argument("--completion-column", default="completion")
 
     # 5. train
     training = commands.add_parser("train", help="Run model training with hardware-aware thermal pacing")
@@ -786,6 +796,31 @@ def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: 
     return 1 if value.get("thermal_abort") else 0
 
 
+def handle_guided_prepare(ui: TerminalUI, output_func: Any) -> int:
+    """Prepare a common text/record dataset without exposing token-binary details."""
+    source = input("Data file (.txt, .jsonl, or .parquet): ").strip().strip('"')
+    model = input("Local model directory: ").strip().strip('"')
+    if not source or not model:
+        raise ValueError("Both a data file and local model directory are required")
+    default_output = str(Path("molt-workspace/datasets") / Path(source).stem)
+    destination = input(f"Output directory [{default_output}]: ").strip().strip('"') or default_output
+    if Path(source).suffix.lower() in {".jsonl", ".parquet"}:
+        from molt_stream.data.records import prepare_records
+        result = prepare_records(source, model, destination, base_model=model)
+    else:
+        from molt_stream.data.text import prepare_text
+        result = prepare_text(source, model, destination, base_model=model)
+    if ui.enabled:
+        ui.check("Training and validation data prepared")
+    output_func(result, title="Dataset ready", rows=[
+        ("Directory", result["directory"]),
+        ("Training tokens", result["train_tokens"]),
+        ("Validation tokens", result["validation_tokens"]),
+        ("Next", f"molt fit-test --config {result['training_config']}"),
+    ])
+    return 0
+
+
 def guided_landing(ui: TerminalUI) -> int:
     """Interactive landing menu for users launching bare 'molt'."""
     hw = get_hardware_info()
@@ -804,11 +839,12 @@ def guided_landing(ui: TerminalUI) -> int:
     print(ui._style("  2. Resume", ui.WHITE) + "            Resume from a verified checkpoint")
     print(ui._style("  3. Benchmark", ui.WHITE) + "         Run a synthetic hardware smoke test")
     print(ui._style("  4. Doctor", ui.WHITE) + "            Check installation identity and hardware")
-    print(ui._style("  5. Configuration", ui.WHITE) + "     Initialize workspace and list assets")
-    print(ui._style("  6. Exit", ui.MUTED))
+    print(ui._style("  5. Prepare Data", ui.WHITE) + "        Convert text, JSONL, or Parquet for training")
+    print(ui._style("  6. Configuration", ui.WHITE) + "     Initialize workspace and list assets")
+    print(ui._style("  7. Exit", ui.MUTED))
 
     try:
-        choice = input(ui._style("\nOption [1-6]: ", ui.GREEN)).strip()
+        choice = input(ui._style("\nOption [1-7]: ", ui.GREEN)).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         return 0
@@ -835,8 +871,10 @@ def guided_landing(ui: TerminalUI) -> int:
     elif choice == "4":
         return handle_doctor(ui, output_func)
     elif choice == "5":
-        return handle_config(dummy_args, ui, output_func)
+        return handle_guided_prepare(ui, output_func)
     elif choice == "6":
+        return handle_config(dummy_args, ui, output_func)
+    elif choice == "7":
         print("[MOLT] Exiting.")
         return 0
     else:
@@ -879,7 +917,8 @@ def main(argv: list[str] | None = None) -> int:
             output(find_runs(), title="Saved runs")
         elif args.command == "export":
             from molt_stream.experiments.export import export_run
-            output(export_run(args.run, args.output_dir), title="Export complete")
+            output(export_run(args.run, args.output_dir, format=args.format,
+                              llama_cpp=args.llama_cpp), title="Export complete")
         elif args.command == "fit-test":
             from molt_stream.training.engine import train
             spec = load_spec(args.config)
@@ -898,16 +937,28 @@ def main(argv: list[str] | None = None) -> int:
             value = inspect_capabilities()
             output(value, title="Workspace info", rows=[(k, v) for k, v in value.items()])
         elif args.command == "prepare":
-            if args.text_file:
-                if args.config or not args.tokenizer or not args.output_dir:
-                    raise ValueError("Text preparation needs --tokenizer and --output-dir, without --config")
-                from molt_stream.data.text import prepare_text
-                value = prepare_text(args.text_file, args.tokenizer, args.output_dir,
-                                     args.validation_fraction, args.base_model)
+            source = args.source or args.text_file
+            tokenizer = args.tokenizer or args.model
+            base_model = args.base_model or args.model
+            if source:
+                if args.config or not tokenizer or not args.output_dir:
+                    raise ValueError("Preparation needs SOURCE, --model (or --tokenizer), and --output")
+                if Path(source).suffix.lower() in {".jsonl", ".parquet"}:
+                    from molt_stream.data.records import prepare_records
+                    value = prepare_records(
+                        source, tokenizer, args.output_dir, args.validation_fraction, base_model,
+                        schema=args.schema, text_column=args.text_column,
+                        messages_column=args.messages_column, prompt_column=args.prompt_column,
+                        completion_column=args.completion_column,
+                    )
+                else:
+                    from molt_stream.data.text import prepare_text
+                    value = prepare_text(source, tokenizer, args.output_dir,
+                                         args.validation_fraction, base_model)
                 output(value, title="Dataset prepared")
                 return 0
             if not args.config:
-                raise ValueError("Provide --config or --text-file with --tokenizer and --output-dir")
+                raise ValueError("Provide --config, or SOURCE with --model and --output")
             spec = load_spec(args.config)
             spec.validate()
             value = {"path": spec.data.path, "bytes": Path(spec.data.path).stat().st_size, "storage_backend": "mmap", "validated": True}

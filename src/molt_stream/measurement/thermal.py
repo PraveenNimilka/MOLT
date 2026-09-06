@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -9,6 +10,93 @@ from molt_stream.core.contracts import TelemetryPoint
 
 if TYPE_CHECKING:
     from molt_stream.core.specs import TrainingSpec
+
+
+@dataclass(frozen=True)
+class MicrobatchThermalDecision:
+    pause_seconds: float
+    temperature_c: float | None
+    stop_reason: str | None = None
+
+
+def postrun_thermal_violation(
+    peak_temperature_c: float | None, *, abort_c: float
+) -> bool:
+    """Return whether delayed telemetry crossed the registered boundary.
+
+    NVML temperature is sampled asynchronously and may report the physical
+    peak only after the last CUDA synchronization.  Centralising this rule
+    keeps the run state and the published metrics consistent.
+    """
+    if not math.isfinite(abort_c) or abort_c <= 0:
+        raise ValueError("abort_c must be a positive finite temperature")
+    return bool(
+        peak_temperature_c is not None
+        and math.isfinite(peak_temperature_c)
+        and peak_temperature_c >= abort_c
+    )
+
+
+def passive_cooldown(
+    read: Callable[[], TelemetryPoint | None], *, recovery_c: float,
+    maximum_wait_seconds: float = 120.0,
+    notify: Callable[[float, float], None] | None = None,
+) -> MicrobatchThermalDecision:
+    """Launch no compute while waiting for a fresh safe sample."""
+    if recovery_c <= 0 or maximum_wait_seconds <= 0:
+        raise ValueError("Invalid passive cooldown settings")
+    started = time.perf_counter()
+    while True:
+        sample = read()
+        now = time.perf_counter()
+        temperature = None if sample is None else sample.gpu_temperature_c
+        if (sample is None or temperature is None or not math.isfinite(temperature)
+                or not 0 <= now - sample.monotonic_seconds <= 1.0):
+            return MicrobatchThermalDecision(now - started, temperature,
+                                             "thermal telemetry missing or stale")
+        if temperature <= recovery_c:
+            return MicrobatchThermalDecision(now - started, temperature)
+        if now - started >= maximum_wait_seconds:
+            return MicrobatchThermalDecision(now - started, temperature,
+                                             "passive cooling timeout")
+        if notify is not None:
+            notify(now - started, temperature)
+        time.sleep(min(0.25, maximum_wait_seconds - (now - started)))
+
+
+def wait_for_thermal_headroom(
+    read: Callable[[], TelemetryPoint | None], *, target_c: float, abort_c: float,
+    maximum_wait_seconds: float = 30.0, maximum_sample_age_seconds: float = 1.0,
+    notify: Callable[[float, float], None] | None = None,
+) -> MicrobatchThermalDecision:
+    """Gate the next microbatch; stale/missing telemetry fails closed.
+
+    Does not preempt an executing CUDA kernel. A hot sample waits for one degree
+    of hysteresis below target, with a bounded timeout. Notification is advisory.
+    """
+    if not (0 < target_c < abort_c and maximum_wait_seconds > 0 and maximum_sample_age_seconds > 0):
+        raise ValueError("Invalid microbatch thermal boundaries")
+    started = time.perf_counter()
+    waited = False
+    while True:
+        sample = read()
+        now = time.perf_counter()
+        temperature = None if sample is None else sample.gpu_temperature_c
+        if (sample is None or temperature is None or not math.isfinite(temperature)
+                or not 0 <= now - sample.monotonic_seconds <= maximum_sample_age_seconds):
+            return MicrobatchThermalDecision(now - started if waited else 0.0, temperature,
+                                            "thermal telemetry missing or stale")
+        if temperature >= abort_c:
+            return MicrobatchThermalDecision(now - started if waited else 0.0, temperature,
+                                            "thermal abort boundary reached")
+        if temperature <= target_c - (1.0 if waited else 0.0):
+            return MicrobatchThermalDecision(now - started if waited else 0.0, temperature)
+        if now - started >= maximum_wait_seconds:
+            return MicrobatchThermalDecision(now - started, temperature, "cooling timeout")
+        if notify is not None:
+            notify(now - started, temperature)
+        time.sleep(min(0.1, maximum_wait_seconds - (now - started)))
+        waited = True
 
 
 def cooling_pause(

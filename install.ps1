@@ -3,7 +3,7 @@
 param([switch]$EagerOnly, [switch]$Plan)
 
 $ErrorActionPreference = 'Stop'
-$syncArgs = @('sync', '--locked', '--no-dev', '--extra', 'qlora')
+$syncArgs = @('sync', '--locked', '--no-dev', '--extra', 'qlora', '--extra', 'data')
 if (-not $EagerOnly) { $syncArgs += @('--extra', 'windows-fusion') }
 $checkArgs = @('run', '--no-sync', 'python', '-m', 'molt_stream.setup_check')
 if (-not $EagerOnly) { $checkArgs += '--compile' }

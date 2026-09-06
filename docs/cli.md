@@ -14,34 +14,44 @@ molt config --init
 molt runs
 ```
 
-For text preparation, replace `stories.txt` and `models/my-model` below with your
-actual local text and model directories. Nothing is downloaded implicitly:
+For preparation, replace the paths below with your local data and model. Nothing
+is downloaded implicitly:
 
 ```powershell
-molt prepare --text-file stories.txt --tokenizer models/my-model --base-model models/my-model --output-dir molt-workspace/datasets/stories
+molt prepare stories.jsonl --model models/my-model --output molt-workspace/datasets/stories
 molt train --config molt-workspace/datasets/stories/training.json --dry-run
 molt fit-test --config molt-workspace/datasets/stories/training.json
 molt train --config molt-workspace/datasets/stories/training.json --ui
 ```
 
-Preparation writes little-endian int32 tokens, a saved tokenizer, and provenance
-metadata. The final 10% of tokens form a contiguous validation tail (adjust with
-`--validation-fraction`); this is not a document-level split. Text is tokenized in
-bounded 65,536-character chunks without special tokens. Existing output folders
-are refused. `--base-model` additionally emits a conservative 20-step QLoRA starter
-config. Inspect and adjust that config before a substantive training run.
+JSONL/Parquet preparation streams records, writes little-endian int32 tokens, and
+uses a deterministic record-level validation tail so a document never crosses
+the split. It recognizes `text`, `messages`, or `prompt` plus `completion`; column
+names and schema can be overridden with the corresponding flags. Plain `.txt`
+retains the older bounded-chunk tokenizer and token-tail split. Existing output
+folders are refused. `--model` emits a conservative QLoRA starter config; inspect
+it before a substantive run.
 
 Use the actual run path printed by training in place of `RUN_DIRECTORY`:
 
 ```powershell
 molt evaluate --run RUN_DIRECTORY
 molt generate --run RUN_DIRECTORY --prompt "Once upon a time" --max-new-tokens 32
-molt export --run RUN_DIRECTORY --output-dir exported-run
+molt export --run RUN_DIRECTORY --output-dir exported-adapter
 ```
 
 Scratch models require `--tokenizer` for text generation. `--prompt-ids` remains
-available. Export verifies hashes, refuses existing destinations, and excludes
-base weights/data; it is a MOLT bundle, not a standalone Hugging Face model.
+available. QLoRA auto-export produces a standard PEFT safetensors adapter; scratch
+auto-export produces a MOLT recovery bundle. Both verify the source checkpoint,
+hash their exported files, refuse existing destinations, and exclude base weights
+and data. Optional GGUF adapter conversion uses the official llama.cpp converter:
+
+```powershell
+molt export --run RUN_DIRECTORY --format gguf --llama-cpp C:\src\llama.cpp --output-dir exported-gguf
+```
+
+The GGUF output is a LoRA adapter, not a merged standalone model, and requires a
+compatible GGUF base model.
 
 `molt research --help` groups experimental commands; existing top-level names are
 retained. CLI batch/context/learning-rate/seed/steps overrides take precedence
@@ -164,9 +174,35 @@ molt config --list
 
 ## 3. High-Level Training Profiles
 
-| Profile | Thermal Ceiling | Cooling Cadence | Intended Use Case |
+Profile names are pacing presets, not hardware-independent speed guarantees.
+
+| Profile | Pacing Begins | Cooling Cadence | Intended Use Case |
 | :--- | :---: | :---: | :--- |
-| **`SPEED`** | `82.0°C` | `50ms` | Maximum throughput (~1,950 tok/s); desktop cards with high airflow. |
-| **`BALANCED`** | `74.0°C` | `220ms` | High throughput (~1,380 tok/s) with Dual-Gear cooling; gaming laptops. |
+| **`SPEED`** | `82.0°C` | `50ms` | Less pacing; verify the resolved abort boundary before running. |
+| **`BALANCED`** | `74.0°C` | `220ms` | Dual-Gear pacing; not a guarantee of thermal equilibrium. |
 | **`COOL`** | `68.0°C` | `300ms` | Conservative thermal limit for warm rooms or quiet fans. |
-| **`ENERGY`** | `70.0°C` | `250ms` | Duty cycle optimized for energy efficiency per token. |
+| **`ENERGY`** | `70.0°C` | `250ms` | Energy experiment preset; savings require measurement. |
+
+## 4. Experimental QLoRA execution options
+
+Two opt-in JSON fields are available for CUDA QLoRA. Neither changes existing
+profiles by default:
+
+```json
+{
+  "qlora_autocast": true,
+  "qlora_fused_optimizer": true
+}
+```
+
+These fields belong inside a complete training configuration, not a standalone
+config. Autocast enables BF16 training matrix operations while loss reduction
+and adapter parameters remain FP32. Fused AdamW requires FP32 CUDA trainable
+parameters and keeps FP32 moment states. Evaluation disables autocast for a
+common comparison precision; NF4 base computation still uses BF16. Precision
+rounding can change updates, so compare validation quality before adopting it.
+
+Saved QLoRA reports include `step_window_rates`; `step.intervals.json` records
+training-step durations including evaluation and pacing. These window rates
+exclude initial setup and final checkpoint writing; `tokens_per_second` remains
+the broader run rate. Short runs do not prove sustained thermal stability.

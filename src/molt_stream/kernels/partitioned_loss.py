@@ -106,13 +106,70 @@ class _ExactPartitionedLinearCrossEntropy(torch.autograd.Function):
         )
 
 
+class _FrozenHeadCrossEntropy(torch.autograd.Function):
+    """Compute each head projection once, retaining only its hidden gradient.
+
+    First-order scalar-loss training only. The classifier is frozen. Chunked
+    gradient precomputation is established prior art, not a novelty claim.
+    """
+
+    @staticmethod
+    def forward(ctx: Any, hidden: torch.Tensor, weight: torch.Tensor,
+                targets: torch.Tensor, chunk_size: int) -> torch.Tensor:
+        flat = hidden.flatten(0, -2)
+        labels = targets.reshape(-1)
+        enabled = torch.is_autocast_enabled(hidden.device.type)
+        dtype = torch.get_autocast_dtype(hidden.device.type)
+        gradient = torch.empty_like(flat)
+        total = torch.zeros((), device=hidden.device,
+                            dtype=torch.float64 if hidden.dtype == torch.float64 else torch.float32)
+        for start in range(0, labels.numel(), chunk_size):
+            end = min(start + chunk_size, labels.numel())
+            with _autocast_context(hidden.device.type, enabled, dtype):
+                part = flat[start:end].detach()
+                logits = F.linear(part, weight)
+            # Cross-entropy is reduced in FP32, exactly as the public QLoRA
+            # path.  Form dL/dlogits directly so the frozen classifier does
+            # not pay for a nested autograd graph per chunk.
+            reduction_logits = (
+                logits.float()
+                if logits.dtype in {torch.float16, torch.bfloat16}
+                else logits
+            )
+            loss = F.cross_entropy(
+                reduction_logits, labels[start:end], reduction="sum"
+            ) / labels.numel()
+            probabilities = reduction_logits.softmax(dim=-1)
+            probabilities[
+                torch.arange(end - start, device=labels.device), labels[start:end]
+            ] -= 1.0
+            probabilities /= labels.numel()
+            with _autocast_context(hidden.device.type, enabled, dtype):
+                local_gradient = probabilities.to(weight.dtype) @ weight
+            total.add_(loss.detach())
+            gradient[start:end].copy_(local_gradient.to(gradient.dtype))
+        ctx.save_for_backward(gradient.reshape_as(hidden))
+        return total
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx: Any, grad_output: torch.Tensor) -> tuple[torch.Tensor, None, None, None]:
+        gradient, = ctx.saved_tensors
+        return gradient * grad_output, None, None, None
+
+
 def exact_partitioned_linear_cross_entropy(
     hidden: torch.Tensor,
     weight: torch.Tensor,
     targets: torch.Tensor,
     chunk_size: int,
+    *,
+    precompute_frozen_gradient: bool = False,
+    backend: str = "auto",
 ) -> torch.Tensor:
     """Compute exact mean CE while bounding materialized logits to one chunk."""
+    if backend not in {"auto", "triton", "analytical"}:
+        raise ValueError(f"Unknown backend: {backend}")
     if hidden.ndim < 2 or weight.ndim != 2:
         raise ValueError("hidden must be [..., width] and weight must be [vocab, width]")
     if hidden.shape[:-1] != targets.shape:
@@ -123,4 +180,20 @@ def exact_partitioned_linear_cross_entropy(
         raise ValueError("targets must use torch.long indices")
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if targets.numel() == 0:
+        raise ValueError("targets must not be empty")
+    if precompute_frozen_gradient:
+        if weight.requires_grad:
+            raise ValueError("Gradient precomputation requires a frozen classifier")
+        if backend in {"auto", "triton"}:
+            from molt_stream.kernels.frozen_linear_cross_entropy import (
+                frozen_linear_cross_entropy,
+                triton_frozen_loss_supported,
+            )
+            if backend == "triton" and not triton_frozen_loss_supported(hidden, weight):
+                raise RuntimeError("Triton frozen-loss backend is unavailable for these tensors")
+            return frozen_linear_cross_entropy(hidden, weight, targets, chunk_size)
+        elif backend == "analytical":
+            if torch.is_grad_enabled() and hidden.requires_grad:
+                return _FrozenHeadCrossEntropy.apply(hidden, weight, targets, chunk_size)
     return _ExactPartitionedLinearCrossEntropy.apply(hidden, weight, targets, chunk_size)

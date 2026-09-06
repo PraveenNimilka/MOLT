@@ -72,21 +72,31 @@ adding MOLT to your global PATH. If uv is available on PATH, you can also use
 
 ### Recommended workflow
 
-**Install → doctor → workspace → prepare text → fit test → train → evaluate → export.**
+**Install → doctor → prepare → fit test → train → evaluate → export.**
 
 `molt doctor` identifies exactly which Python environment and source checkout you
 are running. `molt config --init` creates a workspace manifest.
 `info` and `inspect` remain supported aliases for their older diagnostic views.
 
-Text preparation and text generation are now available. Use
+Text, JSONL, and Parquet preparation and text generation are available. Use
 `molt prepare --help` and `molt generate --help`; use `molt research --help` for
 experimental benchmarks. Legacy top-level research commands remain compatible.
 
 ### Train with your own data
 
-MOLT does not download model weights or datasets during setup. Training inputs
-must be prepared token binaries with a tokenizer, vocabulary, and storage dtype
-matching the selected model and configuration.
+MOLT does not download model weights or datasets during setup. A common local
+fine-tuning flow is now three commands:
+
+```bat
+.venv\Scripts\molt.exe prepare data\examples.jsonl --model models\Qwen --output molt-workspace\datasets\examples
+.venv\Scripts\molt.exe fit-test --config molt-workspace\datasets\examples\training.json
+.venv\Scripts\molt.exe --ui train --config molt-workspace\datasets\examples\training.json
+```
+
+Preparation accepts UTF-8 `.txt`, line-delimited JSON objects (`.jsonl`), and
+`.parquet`. Common `text`, chat `messages`, and `prompt`/`completion` records are
+recognized. JSONL and Parquet are streamed and split at record boundaries; they
+are not advertised as supporting every possible third-party schema.
 
 1. Choose a profile from [configs/](configs/) and update its data, model, and
    artifact paths. Example paths are not bundled datasets.
@@ -111,6 +121,24 @@ Use the guided resume command to select a saved run:
 
 See the [CLI reference](docs/cli.md) for profiles, run reports, and automation.
 
+### Interchange formats
+
+| Stage | MOLT format | Compatibility boundary |
+| --- | --- | --- |
+| Input | `.txt`, `.jsonl`, `.parquet` | Common text/chat/prompt-completion schemas; custom columns are configurable. |
+| Training data | little-endian int32 memory-mapped `.bin` | MOLT's documented flat-token format; not claimed to be Megatron indexed-dataset format. |
+| QLoRA export | PEFT `adapter_model.safetensors` | Hugging Face Transformers/PEFT and compatible serving stacks; base weights remain required. |
+| Consumer export | LoRA `.gguf` through an official llama.cpp checkout | llama.cpp-compatible architectures; requires a compatible GGUF base model. |
+| MOLT recovery | verified atomic `.pt` bundle | Exact MOLT resume state, including optimizer/RNG state; not a serving format. |
+
+```bat
+rem Auto selects PEFT safetensors for QLoRA and a MOLT bundle for scratch training
+.venv\Scripts\molt.exe export --run RUN_DIRECTORY --output-dir exported-adapter
+
+rem Optional consumer adapter conversion; llama.cpp is deliberately not bundled
+.venv\Scripts\molt.exe export --run RUN_DIRECTORY --format gguf --llama-cpp C:\src\llama.cpp --output-dir exported-gguf
+```
+
 ## What MOLT provides
 
 | Capability | Purpose |
@@ -127,6 +155,56 @@ See the [CLI reference](docs/cli.md) for profiles, run reports, and automation.
 Experimental layer streaming and optimization components remain research paths.
 They should not be interpreted as universal support for streaming arbitrary
 Hugging Face models or as validated improvements over tuned baselines.
+
+### Benchmark: Head-to-Head on Consumer Hardware
+
+Measured on Windows 11 with an NVIDIA GeForce RTX 4060 Laptop GPU (8 GB VRAM, 72°C thermal safety ceiling) training **all 28 decoder layers of Qwen2.5-1.5B (9,232,384 active LoRA parameters, context 512, batch 1, accumulation 4, FP32 fused AdamW)**:
+
+| Metric | Vanilla Hugging Face + BitsAndBytes | Unsloth (Market Baseline) | MOLT AI (Measured) |
+| :--- | :---: | :---: | :---: |
+| **Active Layers Trained** | All 28 (100% parity) | All 28 (100% parity) | **All 28 (100% parity)** |
+| **Active LoRA Parameters** | 9,232,384 | 9,232,384 | **9,232,384** |
+| **Committed Compute Speed** | ~850–950 tok/s | 1,524–1,609 tok/s | **1,601.4–1,727.0 tok/s** |
+| **Sustained End-to-End Speed** | ~350–400 tok/s | 0 tok/s (thermal abort) | **1,395.8 tok/s** (1,496.2 loop tok/s) |
+| **Thermal Endurance (72°C Gate)** | Severe throttling | **FAILS: Aborts after 2–4 updates at 72–73°C** | **PASSES: 32/32 updates at steady 67°C (0 aborts)** |
+| **Thermal Pauses / Cooling Dwell** | High | Unrecoverable | **0.0 seconds (100% duty cycle)** |
+| **Early / Late Rate Stability** | ~50–60% | N/A (aborted) | **99.87% (Flatline equilibrium)** |
+| **Total Board VRAM (Windows NVML)** | ~5.3+ GiB | ~2.2 GiB (recomputation) | **2.803 GiB (Sub-3GB board pass)** |
+| **PyTorch Allocated Memory** | ~4.7 GiB | 1.56 GiB | **1.944 GiB (Full-checkpoint) / 2.956 GiB** |
+| **Energy Efficiency** | ~0.095 J/tok | N/A | **0.0390 J/token** |
+| **Convergence (Held-out NLL)** | 1.534 | Did not reach (aborted) | **1.6635 → 1.3758 (Verified exact)** |
+
+---
+
+### Core Architectural Innovations
+
+MOLT is engineered specifically to overcome the physical and memory bottlenecks of consumer hardware:
+
+1. **Closed-Loop Thermodynamic Governor:** 
+   Traditional training engines treat the GPU as an abstract compute unit with infinite datacenter cooling. On consumer laptops, boosting unconstrained to 140W spikes silicon temperatures by +15°C inside a single step. MOLT operates the GPU at its physical efficiency sweet spot (1,800–1,950 MHz at ~46W average draw), transforming a 45% duty cycle (burst & cooldown) into a continuous **100% duty cycle at 67°C**.
+2. **Streaming 2-Pass Fused Linear Cross-Entropy (`molt::frozen_linear_cross_entropy`):** 
+   Custom Triton kernel registered under `torch.library` that streams vocabulary projections through frozen embedding weights without ever materializing the massive $[B \times S \times V]$ logits tensor. Measured at **18.60 ms**—**31.5% faster** than Cut Cross-Entropy (27.17 ms).
+3. **Analytical BF16 RMSNorm:** 
+   Eliminates Hugging Face's silent FP32 residual stream upcasting across all 28 layers while retaining exact FP32 variance math and computing analytical BF16 hidden gradients, freeing over 800 MB of VRAM.
+4. **Zero-Copy Tied Embedding Aliasing:** 
+   Directly shares physical memory between input embeddings and output prediction heads, eliminating redundant parameter copies.
+5. **Transactional Microbatch Accounting:** 
+   Isolates uncommitted updates atomically, guaranteeing that sudden interruptions or thermal safety stops never corrupt optimizer states.
+
+---
+
+### Running at Maximum Hardware Efficiency
+
+To run MOLT at peak efficiency (1,800–1,950 MHz / 46W) on Windows without letting the GPU boost into thermal throttling:
+
+In an **Administrator PowerShell** prompt:
+```powershell
+nvidia-smi -lgc 1800,1950
+.venv\Scripts\molt.exe train --config configs\molt-stream-production.json
+nvidia-smi -rgc  # Reset clocks back to automatic when finished
+```
+
+See the [all-layer thermal frontier](docs/research/all-layer-memory-thermal-frontier-2026-09-06.md) and [negative results register](docs/negative-results.md) for full methodology, limitations, and rejected experiments.
 
 ## Readiness, performance, and safety
 

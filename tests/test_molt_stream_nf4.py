@@ -47,6 +47,24 @@ def test_training_spec_rejects_implicit_compiler_fallback(tmp_path):
         spec.validate()
 
 
+def test_training_spec_rejects_silently_ignored_qlora_compiler(tmp_path):
+    data = tmp_path / "tokens.bin"
+    data.write_bytes(bytes(range(64)))
+    spec = TrainingSpec(
+        mode=TrainingMode.QLORA,
+        data=DataSpec(str(data), context_length=8, storage_dtype="uint8"),
+        model=ModelSpec(
+            vocab_size=256, context_length=8, layers=1,
+            width=8, heads=1, hidden_width=16,
+        ),
+        stream=StreamSpec(device="cuda"),
+        base_model=str(tmp_path / "model"),
+        execution_backend="compile-max-autotune-no-cudagraphs",
+    )
+    with pytest.raises(ValueError, match="checkpoint-safe for QLoRA"):
+        spec.validate()
+
+
 def test_cpu_stream_report_exposes_bundle_policy():
     source = NF4Tensor.quantize(torch.randn(16, 16), block_size=16)
     linear = StreamedLoRALinear(source, rank=4, alpha=8, device=torch.device("cpu"))

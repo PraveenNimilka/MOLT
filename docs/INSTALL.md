@@ -24,7 +24,8 @@ The installer:
   `.tools` and installs uv there without changing your permanent PATH.
 - Uses the lockfile and Python 3.12 to synchronize a project-local `.venv`.
   uv can download managed Python if necessary.
-- Installs QLoRA dependencies and the PyTorch 2.8 / Triton Windows 3.4 pair.
+- Installs QLoRA dependencies, bounded JSONL/Parquet preparation support, and
+  the PyTorch 2.8 / Triton Windows 3.4 pair. Parquet uses locked PyArrow.
 - Checks dependency imports, a small CUDA backward pass, and a compiled backward
   pass compared with eager results. Failures return a nonzero exit code.
 - Does not install drivers, alter antivirus, suspend apps, or install MSVC/CUDA
