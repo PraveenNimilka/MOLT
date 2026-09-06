@@ -64,7 +64,7 @@ def test_fresh_workspace_subprocess_journey(tmp_path):
 @pytest.mark.parametrize("command", ["doctor", "runs", "fit-test", "export", "info", "inspect", "config",
     "prepare", "train", "resume", "benchmark", "evaluate", "report", "compare", "compare-paired",
     "frontier", "generate", "stream-tune", "fusion-benchmark", "curriculum-benchmark",
-    "loss-partition-benchmark", "power-limit", "qlora-benchmark", "research"])
+    "loss-partition-benchmark", "power-limit", "optimize-gpu", "qlora-benchmark", "research"])
 def test_every_public_command_has_subprocess_help(tmp_path, command):
     source = str(Path(__file__).resolve().parents[1] / "src")
     result = subprocess.run([sys.executable, "-m", "molt_stream.cli", command, "--help"], cwd=tmp_path,

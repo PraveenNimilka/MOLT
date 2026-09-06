@@ -88,7 +88,7 @@ budget. Unknown sensors and uncrossed targets produce inconclusive results.
 From repository root, substitute your local model/data paths:
 
 ```powershell
-.\.venv\Scripts\python.exe -m molt_stream.cli --json prepare --text-file "D:/Projects/MOLT AI/Dataset/TinyStories-valid.txt" --tokenizer "D:/Projects/MOLT TEST/AI MODELS/QWEN" --base-model "D:/Projects/MOLT TEST/AI MODELS/QWEN" --output-dir artifacts/mars-v1-20260904/dataset
+.\.venv\Scripts\python.exe -m molt_stream.cli --json prepare --text-file "${MOLT_DATA_ROOT}/Dataset/TinyStories-valid.txt" --tokenizer "${MOLT_MODEL_ROOT}/QWEN" --base-model "${MOLT_MODEL_ROOT}/QWEN" --output-dir artifacts/mars-v1-20260904/dataset
 .\.venv\Scripts\python.exe -m molt_stream.training.mars_probe --config artifacts/mars-v1-20260904/dataset/training.json --output artifacts/mars-v1-20260904/geometry --steps 12
 .\.venv\Scripts\python.exe -m pytest -o addopts='' -q
 ```

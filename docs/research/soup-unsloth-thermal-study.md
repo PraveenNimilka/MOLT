@@ -37,7 +37,7 @@ The instrumented trace identified matrix multiplication, tensor copies, NF4 dequ
 
 ## Reproduce
 
-From `D:\Projects\MOLT` in the project environment:
+From `${MOLT_REPO}` in the project environment:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q

@@ -402,6 +402,13 @@ def build_parser() -> argparse.ArgumentParser:
     power.add_argument("--watts", type=float, default=65.0)
     power.add_argument("--apply", action="store_true", help="Request the hardware change")
 
+    optimize_gpu = commands.add_parser(
+        "optimize-gpu", help="Run training inside an explicit, automatically restored GPU profile"
+    )
+    optimize_gpu.add_argument("--profile", choices=("endurance",), default="endurance")
+    optimize_gpu.add_argument("--config", required=True, help="Training configuration")
+    optimize_gpu.add_argument("-y", "--yes", action="store_true", help="Confirm the temporary clock change")
+
     qlora_benchmark = commands.add_parser("qlora-benchmark", help="Compare a saved QLoRA adapter with local base model")
     qlora_benchmark.add_argument("--run", required=True)
     qlora_benchmark.add_argument("--batches", type=int, default=8)
@@ -967,6 +974,31 @@ def main(argv: list[str] | None = None) -> int:
             output(value, title="Dataset info", rows=[("State", "ready"), ("Path", value["path"]), ("Size", _bytes(value["bytes"])), ("Backend", "OS mmap")])
         elif args.command == "train":
             return handle_guided_train(args, ui, output)
+        elif args.command == "optimize-gpu":
+            from molt_stream.measurement.gpu_profile import (
+                PROFILES as GPU_PROFILES,
+                temporary_graphics_clock,
+                verify_measured_clock_profile,
+            )
+            from molt_stream.training.engine import train
+
+            if not args.yes:
+                if not ui.enabled or not sys.stdin.isatty():
+                    raise ValueError("Temporary GPU clock changes require -y in non-interactive mode")
+                answer = input(
+                    "Temporarily lock GPU clocks to 1500-1650 MHz for this run? [y/N]: "
+                ).strip().lower()
+                if answer not in {"y", "yes"}:
+                    return 0
+            spec = load_spec(args.config)
+            profile = GPU_PROFILES[args.profile]
+            with temporary_graphics_clock(profile):
+                run = train(spec, progress=ui.progress if ui.enabled else None)
+            summary = json.loads((run / "metrics.summary.json").read_text("utf-8"))
+            verification = verify_measured_clock_profile(summary.get("telemetry", {}), profile)
+            value = {"run": str(run), "clock_profile": verification}
+            output(value, title="GPU-optimized training complete")
+            return 0 if verification["verified"] else 1
         elif args.command == "resume":
             return handle_guided_resume(args, ui, output)
         elif args.command == "benchmark":

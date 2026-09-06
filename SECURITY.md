@@ -20,7 +20,10 @@ checkpoints are required.
 - Optional model ecosystems may execute repository-provided model code when
   their own remote-code flags are enabled. MOLT does not enable remote model
   code implicitly.
-- NVML power-limit changes are never implicit and may require administrator
-  privileges.
+- GPU power/clock changes are never implicit. `optimize-gpu` requires
+  Administrator access and explicit confirmation, applies only a documented
+  graphics-clock range, and resets clocks in a `finally` block. A process kill,
+  driver crash, or power loss can bypass cleanup; run `nvidia-smi -rgc` after an
+  abnormal termination.
 
 Security support does not imply a production safety certification.

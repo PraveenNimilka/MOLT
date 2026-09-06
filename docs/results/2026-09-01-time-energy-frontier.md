@@ -95,5 +95,5 @@ the current MOLT interface.
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m ai_local.cli utilization-probe --config configs\molt-ai-50m-frontier-bf16-control.json --micro-batches 24,12,8,6,4,3,2,1 --warmup-steps 3 --steps 20
 .\.venv\Scripts\python.exe -m ai_local.cli controller-probe --config configs\molt-ai-50m-frontier-bf16-control.json --blocks 8 --steps-per-block 10
-.\.venv\Scripts\python.exe -m ai_local.cli frontier "D:\Projects\MOLT AI\50M\runs\20260901-093650-MOLT-AI-50M-BPE-pretrain-v1-68ba7279" "artifacts\runs\20260901-114659-MOLT-AI-50M-frontier-BF16-control-43471575" "artifacts\runs\20260901-115215-MOLT-AI-50M-frontier-FP16-316c6567"
+.\.venv\Scripts\python.exe -m ai_local.cli frontier "${MOLT_DATA_ROOT}\50M\runs\20260901-093650-MOLT-AI-50M-BPE-pretrain-v1-68ba7279" "artifacts\runs\20260901-114659-MOLT-AI-50M-frontier-BF16-control-43471575" "artifacts\runs\20260901-115215-MOLT-AI-50M-frontier-FP16-316c6567"
 ```

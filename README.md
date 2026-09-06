@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.9.2.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 
 MOLT is a Windows-first training runtime for developers and researchers working
@@ -12,7 +12,7 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.9.2 · Open-source alpha.** Suitable for evaluation and
+**Current release: 0.10.0a0 · Open-source research alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
@@ -51,6 +51,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 Use `-EagerOnly` to omit Triton and compilation checks, or `-Plan` to preview setup
 without installing anything. Full prerequisites and troubleshooting are in the
 [installation guide](docs/INSTALL.md).
+
+For an isolated Python environment, the tagged source can also be installed
+with pip. Install CUDA PyTorch from its official index first; otherwise pip can
+resolve the CPU-only wheel on Windows:
+
+```powershell
+py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128; if ($?) { py -m pip install "molt-ai-infrastructure[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha" }
+```
 
 ## Quick start
 
@@ -156,53 +164,44 @@ Experimental layer streaming and optimization components remain research paths.
 They should not be interpreted as universal support for streaming arbitrary
 Hugging Face models or as validated improvements over tuned baselines.
 
-### Benchmark: Head-to-Head on Consumer Hardware
+### Verified single-machine endurance result
 
-Measured on Windows 11 with an NVIDIA GeForce RTX 4060 Laptop GPU (8 GB VRAM, 72°C thermal safety ceiling) training **all 28 decoder layers of Qwen2.5-1.5B (9,232,384 active LoRA parameters, context 512, batch 1, accumulation 4, FP32 fused AdamW)**:
+One preregistered engineering run used Windows 11 and an RTX 4060 Laptop GPU to
+train all 28 Qwen2.5-1.5B decoder layers with 9,232,384 active LoRA parameters,
+context 512, batch 1, accumulation 4, and fused FP32 AdamW. Graphics clocks were
+temporarily constrained to 1,500-1,650 MHz and restored afterward.
 
-| Metric | Vanilla Hugging Face + BitsAndBytes | Unsloth (Market Baseline) | MOLT AI (Measured) |
-| :--- | :---: | :---: | :---: |
-| **Active Layers Trained** | All 28 (100% parity) | All 28 (100% parity) | **All 28 (100% parity)** |
-| **Active LoRA Parameters** | 9,232,384 | 9,232,384 | **9,232,384** |
-| **Committed Compute Speed** | ~850–950 tok/s | 1,524–1,609 tok/s | **1,601.4–1,727.0 tok/s** |
-| **Sustained End-to-End Speed** | ~350–400 tok/s | 0 tok/s (thermal abort) | **1,395.8 tok/s** (1,496.2 loop tok/s) |
-| **Thermal Endurance (72°C Gate)** | Severe throttling | **FAILS: Aborts after 2–4 updates at 72–73°C** | **PASSES: 32/32 updates at steady 67°C (0 aborts)** |
-| **Thermal Pauses / Cooling Dwell** | High | Unrecoverable | **0.0 seconds (100% duty cycle)** |
-| **Early / Late Rate Stability** | ~50–60% | N/A (aborted) | **99.87% (Flatline equilibrium)** |
-| **Total Board VRAM (Windows NVML)** | ~5.3+ GiB | ~2.2 GiB (recomputation) | **2.803 GiB (Sub-3GB board pass)** |
-| **PyTorch Allocated Memory** | ~4.7 GiB | 1.56 GiB | **1.944 GiB (Full-checkpoint) / 2.956 GiB** |
-| **Energy Efficiency** | ~0.095 J/tok | N/A | **0.0390 J/token** |
-| **Convergence (Held-out NLL)** | 1.534 | Did not reach (aborted) | **1.6635 → 1.3758 (Verified exact)** |
+| Metric | Measured result |
+| --- | ---: |
+| Duration / tokens | 3,725.7 s / 4,915,200 |
+| End-to-end throughput | 1,319.3 tokens/s |
+| Training-loop / compute throughput | 1,320.6 / 1,399.5 tokens/s |
+| Peak GPU temperature | 71 C |
+| Early-to-late rate ratio | 97.3% |
+| Board energy | 0.03625 J/token |
+| Cooling recoveries / discarded tokens | 0 / 0 |
+| Held-out NLL | 1.6635 to 1.1045 |
+| PyTorch allocation / total NVML use | 2.956 / 3.75 GiB |
 
----
+This is a **single-machine, single-seed result**, not an official comparison
+with Unsloth, a universal throughput claim, or proof of a novel algorithm.
+Independent reproduction and the registered multi-seed AB/BA comparison remain
+open evidence gates.
 
-### Core Architectural Innovations
+### Safe endurance profile
 
-MOLT is engineered specifically to overcome the physical and memory bottlenecks of consumer hardware:
+On supported NVIDIA Windows systems, an Administrator can explicitly authorize
+MOLT's measured endurance clock range. MOLT restores automatic clocks in a
+`finally` block on completion, error, Ctrl+C, or thermal stop:
 
-1. **Closed-Loop Thermodynamic Governor:** 
-   Traditional training engines treat the GPU as an abstract compute unit with infinite datacenter cooling. On consumer laptops, boosting unconstrained to 140W spikes silicon temperatures by +15°C inside a single step. MOLT operates the GPU at its physical efficiency sweet spot (1,800–1,950 MHz at ~46W average draw), transforming a 45% duty cycle (burst & cooldown) into a continuous **100% duty cycle at 67°C**.
-2. **Streaming 2-Pass Fused Linear Cross-Entropy (`molt::frozen_linear_cross_entropy`):** 
-   Custom Triton kernel registered under `torch.library` that streams vocabulary projections through frozen embedding weights without ever materializing the massive $[B \times S \times V]$ logits tensor. Measured at **18.60 ms**—**31.5% faster** than Cut Cross-Entropy (27.17 ms).
-3. **Analytical BF16 RMSNorm:** 
-   Eliminates Hugging Face's silent FP32 residual stream upcasting across all 28 layers while retaining exact FP32 variance math and computing analytical BF16 hidden gradients, freeing over 800 MB of VRAM.
-4. **Zero-Copy Tied Embedding Aliasing:** 
-   Directly shares physical memory between input embeddings and output prediction heads, eliminating redundant parameter copies.
-5. **Transactional Microbatch Accounting:** 
-   Isolates uncommitted updates atomically, guaranteeing that sudden interruptions or thermal safety stops never corrupt optimizer states.
-
----
-
-### Running at Maximum Hardware Efficiency
-
-To run MOLT at peak efficiency (1,800–1,950 MHz / 46W) on Windows without letting the GPU boost into thermal throttling:
-
-In an **Administrator PowerShell** prompt:
 ```powershell
-nvidia-smi -lgc 1800,1950
-.venv\Scripts\molt.exe train --config configs\molt-stream-production.json
-nvidia-smi -rgc  # Reset clocks back to automatic when finished
+.venv\Scripts\molt.exe optimize-gpu --profile endurance --config YOUR_CONFIG.json
 ```
+
+The command never changes clocks without interactive confirmation (or an
+explicit `-y` for automation), refuses non-elevated execution, and verifies the
+clock range recorded by run telemetry. It does not change firmware, fan curves,
+Defender, other applications, or unsupported laptop power limits.
 
 See the [all-layer thermal frontier](docs/research/all-layer-memory-thermal-frontier-2026-09-06.md) and [negative results register](docs/negative-results.md) for full methodology, limitations, and rejected experiments.
 
@@ -232,7 +231,7 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-See the [release verification notes](docs/releases/0.9.2.md) for automated tests
+See the [release verification notes](docs/releases/0.10.0-alpha.md) for automated tests
 and physical runtime checks. Fresh-machine bootstrap and sustained workload
 behavior still require broader reproduction. The live CI badge represents the
 latest GitHub test status.
@@ -262,7 +261,7 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Architecture](docs/architecture.md)
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
-- [Release notes](docs/releases/0.9.2.md)
+- [Release notes](docs/releases/0.10.0-alpha.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

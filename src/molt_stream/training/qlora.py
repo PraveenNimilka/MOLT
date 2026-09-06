@@ -201,6 +201,7 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
     )
     model, loading_info = AutoModelForCausalLM.from_pretrained(
         spec.base_model,
+        local_files_only=True,
         quantization_config=quantization,
         device_map={"": 0},
         dtype=torch.bfloat16,

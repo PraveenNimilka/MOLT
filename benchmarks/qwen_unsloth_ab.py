@@ -6,12 +6,13 @@ import copy
 import json
 import math
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
+from molt_stream.measurement.gpu_profile import GPUClockProfile, temporary_graphics_clock
 from molt_stream.measurement.target import interpolate_nll_crossing
 
 
@@ -26,6 +27,7 @@ def _temperature_c() -> float:
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     if process.returncode:
         raise RuntimeError(process.stderr.strip() or "nvidia-smi failed")
@@ -64,6 +66,7 @@ def _run_process(command: list[str], log_root: Path) -> subprocess.CompletedProc
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     (log_root.with_suffix(".stdout.txt")).write_text(process.stdout, encoding="utf-8")
     (log_root.with_suffix(".stderr.txt")).write_text(process.stderr, encoding="utf-8")
@@ -162,6 +165,8 @@ def main() -> int:
     parser.add_argument("--unsloth-power-target-watts", type=float, default=30.0)
     parser.add_argument("--unsloth-initial-pause-seconds", type=float, default=0.6)
     parser.add_argument("--unsloth-max-pause-seconds", type=float, default=1.5)
+    parser.add_argument("--graphics-clock-min-mhz", type=int, default=1500)
+    parser.add_argument("--graphics-clock-max-mhz", type=int, default=1650)
     args = parser.parse_args()
     if min(args.steps, args.evaluation_interval, args.validation_batches, args.cold_dwell_seconds) < 1:
         parser.error("counts must be positive")
@@ -169,6 +174,9 @@ def main() -> int:
     if root.exists():
         raise FileExistsError(root)
     root.mkdir(parents=True)
+    clock_profile = GPUClockProfile(
+        "matched-comparison", args.graphics_clock_min_mhz, args.graphics_clock_max_mhz
+    )
     template = json.loads(Path(args.molt_template).read_text(encoding="utf-8"))
     template.update(max_steps=args.steps, evaluation_interval=args.evaluation_interval,
                     qlora_validation_batches=args.validation_batches)
@@ -183,11 +191,12 @@ def main() -> int:
             )
             trial_root = root / f"seed{seed}-{engine}"
             trial_root.mkdir()
-            metrics = (
-                _run_molt(template, trial_root, seed)
-                if engine == "molt"
-                else _run_unsloth(args, trial_root, seed)
-            )
+            with temporary_graphics_clock(clock_profile):
+                metrics = (
+                    _run_molt(template, trial_root, seed)
+                    if engine == "molt"
+                    else _run_unsloth(args, trial_root, seed)
+                )
             trials[engine] = _trial(metrics, args.target_nll, start_c)
         molt, unsloth = trials["molt"], trials["unsloth"]
         reasons: list[str] = []

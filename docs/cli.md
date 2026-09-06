@@ -2,10 +2,22 @@
 
 MOLT provides both a **guided interactive menu** and **direct command-line flags** for advanced scripting.
 
-## 0.9.2 customer workflow
+## 0.10.0 alpha customer workflow
 
 Use the checkout's `.venv\Scripts\molt.exe` if `molt doctor` shows an unexpected
-global Python installation. `doctor` is the primary combined diagnostic view;
+global Python installation. `doctor` is the primary combined diagnostic view.
+
+### Safe GPU endurance profile
+
+From an Administrator PowerShell, run training with the measured temporary
+graphics-clock range and guaranteed restoration:
+
+```powershell
+molt optimize-gpu --profile endurance --config configs\molt-qwen2.5-1.5b-endurance.json
+```
+
+The command requires explicit confirmation, or `-y` in automation. It refuses
+non-elevated execution and verifies sampled clocks before returning success.
 `info` and `inspect` retain their legacy output for compatibility.
 
 ```powershell

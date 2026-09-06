@@ -2,7 +2,7 @@
 
 ## Executive result
 
-**Fact:** `D:\Projects\MOLT` contained zero files and no `.git` directory at the
+**Fact:** `${MOLT_REPO}` contained zero files and no `.git` directory at the
 start of the audit. There were no repository-specific instructions, source,
 configuration, documentation, tests, application, commits, or user changes to
 preserve. This is a greenfield workspace.
