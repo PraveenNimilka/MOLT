@@ -3,8 +3,10 @@
 ## Current source
 
 Source first published from the 0.11 development line is offered under the
-[PolyForm Shield License 1.0.0](../LICENSE). PolyForm Shield is a source-available
-license, not an OSI-approved open-source license. It permits use, modification,
+[PolyForm Shield License 1.0.0](../LICENSE). The repository renders the published
+terms as plain text and supplies MOLT's required notice and line of business.
+PolyForm Shield is a source-available license, not an OSI-approved open-source
+license. It permits use, modification,
 and redistribution for purposes other than providing a product that competes
 with the licensor or its affiliates. Read the complete terms; this summary is
 not a substitute for them.

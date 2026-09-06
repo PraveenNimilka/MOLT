@@ -1,12 +1,16 @@
-# MOLT AI Infrastructure
+# MOLT 0.11 Alpha
 
-**Local model training. Hardware-aware execution. Measurable results.**
+**Fast, thermally stable QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
 [![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
 [![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.11.0-alpha.1.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 [![PyPI publishing](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml)
+
+```bash
+pip install moltengine
+```
 
 MOLT is a Windows-first training runtime for developers and researchers working
 on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
