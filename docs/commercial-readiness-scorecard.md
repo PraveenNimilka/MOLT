@@ -6,7 +6,7 @@ editing code. A 10/10 requires every listed gate and independent confirmation.
 | Dimension | Current | Evidence gained | 10/10 gate still required |
 |---|---:|---|---|
 | Research prototype | 8.5/10 | Working pretrain/QLoRA paths, telemetry, atomic recovery, comparison CLI, positive and negative experiments | Two-model/two-workload reproduction, complete fault matrix, sustained runs |
-| Open-source alpha | 8/10 | MIT license, lockfile, Windows CI, security/contribution policy, built wheel/sdist, successful clean-environment wheel/CLI audit | Release signing, support matrix, public issue templates, configured public remote, external user install |
+| Source-available alpha | 8/10 | PolyForm Shield license, lockfile, Windows CI, security/contribution policy, built wheel/sdist, successful clean-environment wheel/CLI audit | Legal review, support matrix, external user install, independent reproduction |
 | Scientific value | 8/10 | Preregistered gates, tuning/holdout separation, deterministic paired intervals, three-seed early-quality result, explicit context/longer-horizon falsification, negative-results log | Statistical power beyond three seeds, multiple tasks/scales/machines, wall-energy validation, independent reproduction |
 | Engineering originality | 6.5/10 | Local-first evidence/thermal/recovery integration and exact comparison guards | Demonstrated technically distinct systems mechanism that beats mature alternatives across workloads |
 | Algorithmic novelty | 2/10 | Original candidates were precisely tested and rejected | Completed prior-art search plus a technically distinct algorithm, ablations, theory, multi-scale gains, independent reproduction |

@@ -1,15 +1,15 @@
 [project]
 name = "moltengine"
-version = "0.10.0a2"
+version = "0.11.0a1"
 description = "Research-grade local AI training and measurement infrastructure"
 readme = "README.md"
-license = "MIT"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
 authors = [{ name = "Praveen Nimilka" }]
 keywords = ["machine-learning", "local-ai", "training", "energy-measurement", "qlora"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
-  "License :: OSI Approved :: MIT License",
+  "License :: Other/Proprietary License",
   "Operating System :: Microsoft :: Windows :: Windows 11",
   "Programming Language :: Python :: 3.12",
   "Typing :: Typed",
@@ -28,7 +28,7 @@ Homepage = "https://github.com/PraveenNimilka/MOLT"
 Documentation = "https://github.com/PraveenNimilka/MOLT/tree/main/docs"
 Repository = "https://github.com/PraveenNimilka/MOLT.git"
 Issues = "https://github.com/PraveenNimilka/MOLT/issues"
-Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.2.md"
+Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.11.0-alpha.1.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0"]

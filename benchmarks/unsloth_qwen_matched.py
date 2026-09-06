@@ -5,10 +5,10 @@ import argparse
 import json
 import math
 import os
-from pathlib import Path
 import random
 import sys
 import time
+from pathlib import Path
 
 import torch
 
@@ -30,9 +30,12 @@ def main() -> int:
     parser.add_argument("--thermal-power-target-watts", type=float, default=40.0)
     parser.add_argument("--thermal-initial-pause-seconds", type=float, default=0.30)
     parser.add_argument("--thermal-max-pause-seconds", type=float, default=1.0)
+    parser.add_argument("--telemetry-interval-seconds", type=float, default=0.1)
     args = parser.parse_args()
     if min(args.steps, args.evaluation_interval, args.validation_batches) < 1:
         parser.error("step and validation counts must be positive")
+    if args.telemetry_interval_seconds <= 0:
+        parser.error("telemetry interval must be positive")
     if not args.thermal_target_c <= args.thermal_guard_c < args.thermal_abort_c:
         parser.error("thermal boundaries must satisfy target <= guard < abort")
     output = Path(args.output).resolve()
@@ -44,6 +47,7 @@ def main() -> int:
     sys.path.insert(0, str(Path(args.unsloth_site).resolve()))
     from cut_cross_entropy import linear_cross_entropy
     from unsloth import FastLanguageModel
+
     from molt_stream.core.specs import DataSpec
     from molt_stream.data.bytes import MMapTokenBatcher
     from molt_stream.measurement.telemetry import NVMLTelemetry, integrate_board_energy
@@ -61,7 +65,7 @@ def main() -> int:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    telemetry = NVMLTelemetry(0.05)
+    telemetry = NVMLTelemetry(args.telemetry_interval_seconds)
     telemetry.start()
     started = time.perf_counter()
     model, _ = FastLanguageModel.from_pretrained(
@@ -155,9 +159,10 @@ def main() -> int:
                 if not gate():
                     return None
                 x, y = validation.batch(1)
-                with guarded_decoder_evaluation(model, gate):
-                    with torch.autocast("cuda", dtype=torch.bfloat16):
-                        losses.append(float(exact_loss(x, y)))
+                with guarded_decoder_evaluation(model, gate), torch.autocast(
+                    "cuda", dtype=torch.bfloat16
+                ):
+                    losses.append(float(exact_loss(x, y)))
                 if not gate():
                     return None
         except EvaluationThermalStop:

@@ -4,10 +4,10 @@ MOLT publishes Python distributions through PyPI Trusted Publishing. GitHub
 Actions exchanges a short-lived OpenID Connect identity with PyPI; no reusable
 PyPI API token is stored in the repository or in GitHub secrets.
 
-## One-time PyPI owner setup
+## PyPI trusted-publisher configuration
 
-The project does not yet exist on PyPI. Sign in to PyPI, open **Account settings →
-Publishing**, and add a pending GitHub publisher with these exact values:
+The `moltengine` project already exists on PyPI. Its trusted publisher must keep
+these exact values:
 
 | Field | Value |
 | --- | --- |
@@ -17,8 +17,8 @@ Publishing**, and add a pending GitHub publisher with these exact values:
 | Workflow | `publish.yml` |
 | Environment | `pypi` |
 
-The pending publisher creates the project during the first successful publish.
-The name is not reserved until that happens, so publish promptly after setup.
+Manage this binding from the PyPI project's publishing settings. Do not add an
+API token to the repository or GitHub Actions configuration.
 
 ## Release procedure
 
@@ -33,8 +33,8 @@ The name is not reserved until that happens, so publish promptly after setup.
 6. Verify the GitHub `publish` workflow, PyPI file hashes, and a clean-environment
    installation before announcing the release.
 
-For the existing `0.10.0a2` alpha, the workflow may instead be started once from
-**Actions → publish → Run workflow** after the pending publisher is configured.
+For `0.11.0a1`, the workflow may instead be started once from
+**Actions → publish → Run workflow** after the trusted publisher is verified.
 PyPI versions are immutable: never reuse a version after it has been uploaded.
 
 ## Local distribution verification

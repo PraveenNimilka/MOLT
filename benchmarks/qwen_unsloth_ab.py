@@ -12,9 +12,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from molt_stream.measurement.gpu_profile import GPUClockProfile, temporary_graphics_clock
+from molt_stream.measurement.gpu_profile import (
+    GPUClockProfile,
+    temporary_graphics_clock,
+)
 from molt_stream.measurement.target import interpolate_nll_crossing
-
 
 SEEDS = (1337, 2027, 4099)
 ORDERS = (("unsloth", "molt"), ("molt", "unsloth"), ("unsloth", "molt"))
@@ -111,6 +113,7 @@ def _run_unsloth(args: argparse.Namespace, root: Path, seed: int) -> dict[str, A
         "--thermal-power-target-watts", str(args.unsloth_power_target_watts),
         "--thermal-initial-pause-seconds", str(args.unsloth_initial_pause_seconds),
         "--thermal-max-pause-seconds", str(args.unsloth_max_pause_seconds),
+        "--telemetry-interval-seconds", str(args.telemetry_interval_seconds),
     ]
     process = _run_process(command, root / "unsloth-process")
     metrics_path = destination / "metrics.summary.json"
@@ -165,6 +168,7 @@ def main() -> int:
     parser.add_argument("--unsloth-power-target-watts", type=float, default=30.0)
     parser.add_argument("--unsloth-initial-pause-seconds", type=float, default=0.6)
     parser.add_argument("--unsloth-max-pause-seconds", type=float, default=1.5)
+    parser.add_argument("--telemetry-interval-seconds", type=float, default=0.1)
     parser.add_argument("--graphics-clock-min-mhz", type=int, default=1500)
     parser.add_argument("--graphics-clock-max-mhz", type=int, default=1650)
     args = parser.parse_args()

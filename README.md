@@ -2,9 +2,9 @@
 
 **Local model training. Hardware-aware execution. Measurable results.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.2.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.11.0-alpha.1.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 [![PyPI publishing](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml)
 
@@ -13,11 +13,31 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.10.0a2 · Open-source research alpha.** Suitable for evaluation and
+**Current release: 0.11.0a1 · Source-available research alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
 [Install](#install) · [Quick start](#quick-start) · [Documentation](#documentation) · [Support](SUPPORT.md) · [Contribute](CONTRIBUTING.md)
+
+## Measured result and comparison status
+
+One all-layer Qwen2.5-1.5B run completed for one hour on the development RTX 4060
+Laptop GPU at a measured 1,319 end-to-end tokens/s, 0.03625 GPU-board J/token,
+71 C peak temperature, and 97.3% last-quarter/first-quarter throughput stability.
+Held-out NLL changed from 1.6635 to 1.1045. This result uses one machine and one
+seed; it is not a competitor benchmark.
+
+| Evidence gate | Status |
+| --- | --- |
+| One-hour MOLT endurance | **Passed once**: 2,400 updates, all 28 layers |
+| Same-quality three-seed iso-clock MOLT vs. Unsloth | **Pending** |
+| 30-minute-per-arm AB/BA comparison | **Pending** |
+| General performance or novelty claim | **Not established** |
+
+The supplied `+37%` MOLT-versus-Unsloth aggregate is not present in the repository's
+raw artifact registry and is therefore not published as verified. See the
+[technical report](docs/research/hardware-constrained-peft-report.md) and run the
+[single-seed protocol screen](#reproduce-the-iso-clock-screen) to generate new evidence.
 
 ## Install
 
@@ -61,7 +81,7 @@ first; otherwise pip can resolve the CPU-only wheel on Windows:
 
 ```powershell
 py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-py -m pip install "moltengine[qlora,data,windows-fusion]==0.10.0a2"
+py -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a1"
 ```
 
 Then verify the active Python environment and CUDA runtime:
@@ -74,7 +94,7 @@ For a reproducible source checkout, install the signed release tag rather than
 an unversioned branch:
 
 ```powershell
-py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha.2"
+py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.11.0-alpha.1"
 ```
 
 Maintainer publishing and supply-chain instructions are in
@@ -225,6 +245,32 @@ Defender, other applications, or unsupported laptop power limits.
 
 See the [all-layer thermal frontier](docs/research/all-layer-memory-thermal-frontier-2026-09-06.md) and [negative results register](docs/negative-results.md) for full methodology, limitations, and rejected experiments.
 
+### Reproduce the iso-clock screen
+
+The public harness runs MOLT and an isolated Unsloth 2026.9.2 installation with
+the same local Qwen2.5-1.5B checkpoint, token files, rank-8 all-layer adapters,
+context 512, B1/G4, and 1,500--1,650 MHz graphics-clock range. It samples NVML
+telemetry every 100 ms and restores automatic clocks after each arm.
+
+Set the local inputs, then run a non-mutating preflight:
+
+```powershell
+$env:MOLT_QWEN_1P5B_MODEL = "D:\models\Qwen2.5-1.5B"
+$env:MOLT_DATA_ROOT = "D:\molt-data"
+$env:MOLT_UNSLOTH_SITE = "D:\molt-competitors\unsloth-site"
+python benchmarks/reproduce_isoclock.py --preflight-only
+```
+
+From an Administrator PowerShell, start the confirmed 16-update screen:
+
+```powershell
+python benchmarks/reproduce_isoclock.py
+```
+
+The script prompts before changing clocks, refuses insufficient VRAM or missing
+inputs, verifies the measured clock range, preserves raw output, and labels the
+one-seed screen as insufficient for a general comparison claim.
+
 ## Readiness, performance, and safety
 
 MOLT distinguishes **installed dependencies**, **successful runtime checks**, and
@@ -251,7 +297,7 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-See the [release verification notes](docs/releases/0.10.0-alpha.2.md) for automated tests
+See the [release verification notes](docs/releases/0.11.0-alpha.1.md) for automated tests
 and physical runtime checks. Fresh-machine bootstrap and sustained workload
 behavior still require broader reproduction. The live CI badge represents the
 latest GitHub test status.
@@ -281,21 +327,21 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Architecture](docs/architecture.md)
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
-- [Release notes](docs/releases/0.10.0-alpha.2.md)
+- [Technical report](docs/research/hardware-constrained-peft-report.md)
+- [Release notes](docs/releases/0.11.0-alpha.1.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
 ## License and feedback
 
-MOLT is distributed under the [MIT License](LICENSE), which permits commercial
-use subject to its terms. Model weights, datasets, and dependencies retain their
-own licenses.
-
-MIT is an open-source license: recipients may inspect, build, modify, and
-redistribute the published source while preserving the required license notice.
-Public source code cannot simultaneously be made technically uncopyable. Keep
-future proprietary services or private optimization modules outside this public
-repository and obtain qualified legal advice before changing the licensing model.
+Current MOLT source is offered under the [PolyForm Shield License 1.0.0](LICENSE).
+It is source-available, not OSI open source, and restricts use to provide products
+that compete with the licensor. Model weights, datasets, and dependencies retain
+their own licenses. Read the [licensing boundary](docs/licensing.md): revisions
+previously published under MIT remain available under their existing MIT grant.
+Publicly distributed Python source can still be inspected and copied; the license
+creates legal conditions, not a technical copy-prevention mechanism. Obtain
+qualified legal advice before relying on the noncompete boundary.
 
 Report reproducible bugs through [GitHub Issues](https://github.com/PraveenNimilka/MOLT/issues).
 Include the commit, Python/PyTorch versions, relevant configuration, and error
