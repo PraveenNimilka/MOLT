@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.1.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 [![PyPI publishing](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml)
 
@@ -13,7 +13,7 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.10.0a0 · Open-source research alpha.** Suitable for evaluation and
+**Current release: 0.10.0a1 · Open-source research alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
@@ -57,13 +57,13 @@ with pip. Install CUDA PyTorch from its official index first; otherwise pip can
 resolve the CPU-only wheel on Windows:
 
 ```powershell
-py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128; if ($?) { py -m pip install "molt-ai-infrastructure[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha" }
+py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128; if ($?) { py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha.1" }
 ```
 
 After the first PyPI release is published, the second command becomes:
 
 ```powershell
-py -m pip install "molt-ai-infrastructure[qlora,data,windows-fusion]==0.10.0a0"
+py -m pip install "moltengine[qlora,data,windows-fusion]==0.10.0a1"
 ```
 
 Maintainer publishing and supply-chain instructions are in
@@ -240,7 +240,7 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-See the [release verification notes](docs/releases/0.10.0-alpha.md) for automated tests
+See the [release verification notes](docs/releases/0.10.0-alpha.1.md) for automated tests
 and physical runtime checks. Fresh-machine bootstrap and sustained workload
 behavior still require broader reproduction. The live CI badge represents the
 latest GitHub test status.
@@ -270,7 +270,7 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Architecture](docs/architecture.md)
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
-- [Release notes](docs/releases/0.10.0-alpha.md)
+- [Release notes](docs/releases/0.10.0-alpha.1.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

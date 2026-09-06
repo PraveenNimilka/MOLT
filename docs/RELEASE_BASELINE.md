@@ -12,8 +12,8 @@
 
 * **Operating System:** Windows 11 Build 26200
 * **Python Runtime:** Python `3.12.13` (64-bit)
-* **Package Name:** `molt-ai-infrastructure`
-* **Package Version:** `0.2.0` (from `pyproject.toml`)
+* **Package Name:** `moltengine`
+* **Package Version:** `0.10.0a1` (from `pyproject.toml`)
 * **Console Entry Point:** `molt = "molt_stream.cli:main"`
 
 ### Installed Runtime Dependencies `[MEASURED]`

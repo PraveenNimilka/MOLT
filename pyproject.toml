@@ -1,6 +1,6 @@
 [project]
-name = "molt-ai-infrastructure"
-version = "0.10.0a0"
+name = "moltengine"
+version = "0.10.0a1"
 description = "Research-grade local AI training and measurement infrastructure"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ Homepage = "https://github.com/PraveenNimilka/MOLT"
 Documentation = "https://github.com/PraveenNimilka/MOLT/tree/main/docs"
 Repository = "https://github.com/PraveenNimilka/MOLT.git"
 Issues = "https://github.com/PraveenNimilka/MOLT/issues"
-Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.md"
+Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.1.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0"]

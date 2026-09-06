@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: pypi
-      url: https://pypi.org/project/molt-ai-infrastructure/
+      url: https://pypi.org/project/moltengine/
     permissions:
       id-token: write
     steps:

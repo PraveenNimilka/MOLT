@@ -11,7 +11,7 @@ Publishing**, and add a pending GitHub publisher with these exact values:
 
 | Field | Value |
 | --- | --- |
-| PyPI project name | `molt-ai-infrastructure` |
+| PyPI project name | `moltengine` |
 | GitHub owner | `PraveenNimilka` |
 | Repository | `MOLT` |
 | Workflow | `publish.yml` |
@@ -32,7 +32,7 @@ The name is not reserved until that happens, so publish promptly after setup.
 6. Verify the GitHub `publish` workflow, PyPI file hashes, and a clean-environment
    installation before announcing the release.
 
-For the existing `0.10.0a0` alpha, the workflow may instead be started once from
+For the existing `0.10.0a1` alpha, the workflow may instead be started once from
 **Actions → publish → Run workflow** after the pending publisher is configured.
 PyPI versions are immutable: never reuse a version after it has been uploaded.
 

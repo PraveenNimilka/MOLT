@@ -248,8 +248,8 @@ wheels = [
 ]
 
 [[package]]
-name = "molt-ai-infrastructure"
-version = "0.10.0a0"
+name = "moltengine"
+version = "0.10.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
