@@ -36,7 +36,7 @@ def guarded_decoder_training(
 
     handles: list[torch.utils.hooks.RemovableHandle] = []
 
-    def check(module: torch.nn.Module, unused: object) -> None:
+    def check(module: torch.nn.Module, _unused: object) -> None:
         parameter = next(module.parameters(), None)
         if parameter is not None and parameter.is_cuda:
             torch.cuda.synchronize(parameter.device)

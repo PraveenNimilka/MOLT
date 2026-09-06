@@ -249,7 +249,7 @@ wheels = [
 
 [[package]]
 name = "moltengine"
-version = "0.10.0a1"
+version = "0.10.0a2"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

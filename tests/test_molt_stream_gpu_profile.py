@@ -49,3 +49,18 @@ def test_measured_clock_verification():
         gpu_profile.PROFILES["endurance"],
     )
     assert result["verified"] is True
+
+
+def test_nvidia_smi_uses_an_absolute_executable(monkeypatch, tmp_path):
+    executable = tmp_path / "nvidia-smi.exe"
+    executable.write_bytes(b"")
+    calls = []
+    monkeypatch.setenv("SystemRoot", str(tmp_path / "missing"))
+    monkeypatch.setattr(gpu_profile.shutil, "which", lambda name: str(executable))
+    monkeypatch.setattr(
+        gpu_profile.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append(command) or _result(),
+    )
+    gpu_profile._nvidia_smi("-q")
+    assert calls == [[str(executable), "-q"]]

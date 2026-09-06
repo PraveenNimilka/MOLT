@@ -15,8 +15,8 @@ run that command. With Git already installed, the complete Command Prompt line i
 git clone https://github.com/PraveenNimilka/MOLT.git && cd MOLT && powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Private repositories require GitHub access. Existing users should use
-`git pull --ff-only origin main` inside their checkout, then run the setup command;
+Existing users should use `git pull --ff-only origin main` inside their checkout,
+then run the setup command;
 do not clone over an existing directory.
 
 The installer:
@@ -81,7 +81,7 @@ Logs print the failing command's diagnostics. Existing run artifacts are not rem
 
 ## Sources
 
-Implementation verification: 100 local tests passed, including mocked installer
+Implementation verification: 283 local tests passed, including mocked installer
 success/failure paths and non-mutating plan mode. The real CUDA eager and compiled
 backward probes passed on the development RTX 4060 / PyTorch 2.8 environment.
 The initial uv bootstrap/download path has not been end-to-end tested on a fresh

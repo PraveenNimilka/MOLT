@@ -46,7 +46,8 @@ class SavedActivationOffload(AbstractContextManager[None]):
         return None
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> bool | None:
-        assert self._hooks is not None
+        if self._hooks is None:
+            raise RuntimeError("activation offload context was not entered")
         return self._hooks.__exit__(exc_type, exc_value, traceback)
 
 

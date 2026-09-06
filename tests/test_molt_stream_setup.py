@@ -25,6 +25,7 @@ def test_installer_plan_is_locked_and_scoped(eager):
     assert "qlora" in plan["sync"]
     assert ("windows-fusion" in plan["sync"]) is not eager
     assert ("--compile" in plan["check"]) is not eager
+    assert plan["legacy_distribution"] == "molt-ai-infrastructure"
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
@@ -45,6 +46,37 @@ def test_installer_propagates_failure_without_real_downloads(tmp_path, exit_code
     calls = (tmp_path / "calls.log").read_text().splitlines()
     assert len(calls) == (2 if exit_code == 0 else 1)
     assert "sync --locked" in calls[0]
+
+
+def test_installer_migrates_legacy_distribution_without_deleting_source(tmp_path):
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("Windows PowerShell required")
+    shutil.copyfile("install.ps1", tmp_path / "install.ps1")
+    (tmp_path / "uv.lock").write_text("# mock", encoding="utf-8")
+    python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    (tmp_path / "uv.cmd").write_text(
+        "@echo off\n"
+        "echo %*>>calls.log\n"
+        "if \"%1 %2\"==\"pip show\" echo Name: molt-ai-infrastructure\n"
+        "exit /b 0\n",
+        encoding="ascii",
+    )
+    env = {**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]}
+    subprocess.run(
+        [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "install.ps1")],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=True,
+    )
+    calls = (tmp_path / "calls.log").read_text().splitlines()
+    assert calls[0].startswith("pip show --python")
+    assert calls[1].startswith("pip uninstall --python")
+    assert "molt-ai-infrastructure" in calls[1]
+    assert calls[2].startswith("sync --locked")
+    assert "--reinstall-package moltengine" in calls[2]
+    assert calls[3].startswith("run --no-sync")
+    assert (tmp_path / "install.ps1").is_file()
 
 
 def test_setup_reports_errors_without_claiming_success(monkeypatch, capsys):

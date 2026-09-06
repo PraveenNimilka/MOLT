@@ -26,13 +26,14 @@ The name is not reserved until that happens, so publish promptly after setup.
 2. Update the version in `pyproject.toml`, release notes, and user-facing version
    constants in one release commit.
 3. Run `uv run --frozen python -m pytest -q` and `uv build` locally.
-4. Create and push the signed release tag.
+4. Create and push an annotated release tag; use a cryptographically signed tag
+   when maintainer signing is configured.
 5. Create a GitHub Release from that tag. Publishing the release starts
    `.github/workflows/publish.yml`.
 6. Verify the GitHub `publish` workflow, PyPI file hashes, and a clean-environment
    installation before announcing the release.
 
-For the existing `0.10.0a1` alpha, the workflow may instead be started once from
+For the existing `0.10.0a2` alpha, the workflow may instead be started once from
 **Actions → publish → Run workflow** after the pending publisher is configured.
 PyPI versions are immutable: never reuse a version after it has been uploaded.
 

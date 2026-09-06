@@ -145,5 +145,6 @@ class CompressedSavedActivations(AbstractContextManager[None]):
         return None
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> bool | None:
-        assert self._hooks is not None
+        if self._hooks is None:
+            raise RuntimeError("activation compression context was not entered")
         return self._hooks.__exit__(exc_type, exc_value, traceback)

@@ -316,7 +316,8 @@ def train_qlora(
     _requirements()
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
 
-    assert spec.base_model is not None
+    if spec.base_model is None:
+        raise ValueError("QLoRA requires base_model")
     random.seed(spec.seed)
     torch.manual_seed(spec.seed)
     run = Path(resume) if resume else Path(spec.artifacts_dir) / (
@@ -586,7 +587,8 @@ def train_qlora(
                 if micro_loss is not None:
                     del micro_loss
                 break
-            assert micro_loss is not None
+            if micro_loss is None:
+                raise RuntimeError("QLoRA microbatch completed without producing a loss")
             loss_sum += float(micro_loss.detach())
             del micro_loss
             if not microbatch_gate():

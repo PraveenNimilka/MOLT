@@ -1,9 +1,11 @@
 """Tests for modernized MOLT CLI, workspace discovery, and profiles."""
 import json
 from pathlib import Path
+import subprocess
 import pytest
 
-from molt_stream.cli import main
+from molt_stream import cli as cli_module
+from molt_stream.cli import TerminalUI, main
 from molt_stream.core.discovery import (
     find_datasets,
     find_models,
@@ -13,6 +15,29 @@ from molt_stream.core.discovery import (
 )
 from molt_stream.core.profiles import PROFILES, apply_profile, get_profile
 from molt_stream.core.specs import load_spec
+
+
+def test_cuda_repair_uses_uv_when_project_venv_has_no_pip(monkeypatch):
+    commands = []
+    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *args: "y")
+    monkeypatch.setattr(cli_module, "get_hardware_info", lambda: {"gpu_name": "RTX"})
+    monkeypatch.setattr(cli_module.shutil, "which", lambda name: r"C:\tools\uv.exe")
+    monkeypatch.setattr(
+        cli_module.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0),
+    )
+
+    assert cli_module._verify_cuda_or_prompt_install(
+        TerminalUI(enabled=True, color=False), "cuda"
+    ) is False
+    assert commands[0][:5] == [
+        r"C:\tools\uv.exe", "pip", "install", "--python", cli_module.sys.executable,
+    ]
+    assert "torch==2.8.0" in commands[0]
 
 
 def test_hardware_discovery_returns_expected_keys():

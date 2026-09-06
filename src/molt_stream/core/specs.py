@@ -362,7 +362,6 @@ class TrainingSpec:
                 raise ValueError("min_pause_ms must be between zero and max_pause_ms")
             if self.thermal_protective_pause_ms < self.max_pause_ms:
                 raise ValueError("thermal_protective_pause_ms must be >= max_pause_ms")
-            assert self.thermal_cruise_max_c is not None
             if not 0 < self.thermal_protective_hysteresis_c < (
                 self.thermal_cruise_max_c - self.thermal_target_c
             ):

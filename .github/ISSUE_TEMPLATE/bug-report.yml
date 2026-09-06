@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible MOLT defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include private datasets, credentials, model weights, or sensitive paths.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest safe command/configuration and complete error text.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Paste `molt --json doctor` after removing sensitive paths.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MOLT version or commit
+      placeholder: 0.10.0a2 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: Reproducibility
+      options:
+        - Every time
+        - Intermittent
+        - Once
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private data, model weights, and sensitive paths.
+          required: true

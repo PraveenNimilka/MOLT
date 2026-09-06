@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.1.md)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.10.0-alpha.2.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
 [![PyPI publishing](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/publish.yml)
 
@@ -13,13 +13,15 @@ on consumer NVIDIA laptops and workstations. It brings small-model pretraining,
 QLoRA fine-tuning, thermal pacing, checkpoint recovery, and experiment reporting
 into one command-line workflow.
 
-**Current release: 0.10.0a1 · Open-source research alpha.** Suitable for evaluation and
+**Current release: 0.10.0a2 · Open-source research alpha.** Suitable for evaluation and
 controlled experiments. Production use requires workload-specific validation;
 MOLT does not currently offer a commercial support SLA or certified reliability.
 
-[Install](#install-in-one-command) · [Quick start](#quick-start) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
+[Install](#install) · [Quick start](#quick-start) · [Documentation](#documentation) · [Support](SUPPORT.md) · [Contribute](CONTRIBUTING.md)
 
-## Install in one command
+## Install
+
+### Verified Windows setup
 
 Run in **Windows Command Prompt**, from a directory where you want a new
 `MOLT` folder:
@@ -52,18 +54,27 @@ Use `-EagerOnly` to omit Triton and compilation checks, or `-Plan` to preview se
 without installing anything. Full prerequisites and troubleshooting are in the
 [installation guide](docs/INSTALL.md).
 
-For an isolated Python environment, the tagged source can also be installed
-with pip. Install CUDA PyTorch from its official index first; otherwise pip can
-resolve the CPU-only wheel on Windows:
+### Install from PyPI
+
+`moltengine` is published on PyPI. Install CUDA PyTorch from its official index
+first; otherwise pip can resolve the CPU-only wheel on Windows:
 
 ```powershell
-py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128; if ($?) { py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha.1" }
+py -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+py -m pip install "moltengine[qlora,data,windows-fusion]==0.10.0a2"
 ```
 
-After the first PyPI release is published, the second command becomes:
+Then verify the active Python environment and CUDA runtime:
 
 ```powershell
-py -m pip install "moltengine[qlora,data,windows-fusion]==0.10.0a1"
+molt doctor
+```
+
+For a reproducible source checkout, install the signed release tag rather than
+an unversioned branch:
+
+```powershell
+py -m pip install "moltengine[qlora,data,windows-fusion] @ git+https://github.com/PraveenNimilka/MOLT.git@v0.10.0-alpha.2"
 ```
 
 Maintainer publishing and supply-chain instructions are in
@@ -240,7 +251,7 @@ Historical measurements and methodology are retained in the
 quality are not proof of an equal-quality speed or energy advantage. This release
 does not claim a universal throughput target or a new training-algorithm breakthrough.
 
-See the [release verification notes](docs/releases/0.10.0-alpha.1.md) for automated tests
+See the [release verification notes](docs/releases/0.10.0-alpha.2.md) for automated tests
 and physical runtime checks. Fresh-machine bootstrap and sustained workload
 behavior still require broader reproduction. The live CI badge represents the
 latest GitHub test status.
@@ -270,7 +281,7 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 - [Architecture](docs/architecture.md)
 - [Benchmark methodology](docs/benchmarking.md)
 - [Development guide](docs/development.md)
-- [Release notes](docs/releases/0.10.0-alpha.1.md)
+- [Release notes](docs/releases/0.10.0-alpha.2.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
@@ -279,6 +290,12 @@ entries manually in Windows Security; see the [0.9.1 release notes](docs/release
 MOLT is distributed under the [MIT License](LICENSE), which permits commercial
 use subject to its terms. Model weights, datasets, and dependencies retain their
 own licenses.
+
+MIT is an open-source license: recipients may inspect, build, modify, and
+redistribute the published source while preserving the required license notice.
+Public source code cannot simultaneously be made technically uncopyable. Keep
+future proprietary services or private optimization modules outside this public
+repository and obtain qualified legal advice before changing the licensing model.
 
 Report reproducible bugs through [GitHub Issues](https://github.com/PraveenNimilka/MOLT/issues).
 Include the commit, Python/PyTorch versions, relevant configuration, and error

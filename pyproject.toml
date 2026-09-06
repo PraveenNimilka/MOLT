@@ -1,6 +1,6 @@
 [project]
 name = "moltengine"
-version = "0.10.0a1"
+version = "0.10.0a2"
 description = "Research-grade local AI training and measurement infrastructure"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ Homepage = "https://github.com/PraveenNimilka/MOLT"
 Documentation = "https://github.com/PraveenNimilka/MOLT/tree/main/docs"
 Repository = "https://github.com/PraveenNimilka/MOLT.git"
 Issues = "https://github.com/PraveenNimilka/MOLT/issues"
-Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.1.md"
+Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.2.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0"]
@@ -52,14 +52,12 @@ build-backend = "hatchling.build"
 packages = ["src/molt_stream"]
 
 [tool.hatch.build.targets.sdist]
-exclude = [
-  "/.c",
-  "/.pytest_cache",
-  "/.venv",
-  "/.tools",
-  "/artifacts",
-  "/data/prepared",
-  "/dist",
+include = [
+  "/src",
+  "/LICENSE",
+  "/README.md",
+  "/SECURITY.md",
+  "/pyproject.toml",
 ]
 
 [tool.pytest.ini_options]

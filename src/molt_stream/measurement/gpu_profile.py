@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import os
+from pathlib import Path
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Iterator
@@ -33,9 +36,13 @@ def is_windows_administrator() -> bool:
 
 
 def _nvidia_smi(*arguments: str) -> subprocess.CompletedProcess[str]:
+    system_binary = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe"
+    executable = str(system_binary) if system_binary.is_file() else shutil.which("nvidia-smi.exe")
+    if executable is None:
+        raise CapabilityError("nvidia-smi is unavailable")
     try:
         return subprocess.run(
-            ["nvidia-smi", *arguments], capture_output=True, text=True, check=False
+            [executable, *arguments], capture_output=True, text=True, check=False
         )
     except OSError as exc:
         raise CapabilityError(f"nvidia-smi is unavailable: {exc}") from exc

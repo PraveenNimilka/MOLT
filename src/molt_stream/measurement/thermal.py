@@ -492,7 +492,8 @@ class ThermalCruiseController:
         if self._pause_to_compute_ratio is None:
             self._pause_to_compute_ratio = self.initial_pause_seconds / step_seconds
             self._cruise_ratio = self._pause_to_compute_ratio
-        assert self._cruise_ratio is not None
+        if self._cruise_ratio is None:
+            raise RuntimeError("thermal cruise controller failed to initialize")
         # Learn the equilibrium duty ratio slowly and symmetrically. Keeping
         # this state separate from fast feedback prevents integral wind-up.
         equilibrium_error = self._filtered_temperature_c - self.target_c

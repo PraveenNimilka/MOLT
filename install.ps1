@@ -8,7 +8,12 @@ if (-not $EagerOnly) { $syncArgs += @('--extra', 'windows-fusion') }
 $checkArgs = @('run', '--no-sync', 'python', '-m', 'molt_stream.setup_check')
 if (-not $EagerOnly) { $checkArgs += '--compile' }
 if ($Plan) {
-    @{ project = $PSScriptRoot; sync = $syncArgs; check = $checkArgs } | ConvertTo-Json
+    @{
+        project = $PSScriptRoot
+        sync = $syncArgs
+        check = $checkArgs
+        legacy_distribution = 'molt-ai-infrastructure'
+    } | ConvertTo-Json
     return
 }
 if ($env:OS -ne 'Windows_NT') { throw 'This installer targets Windows. See docs/INSTALL.md.' }
@@ -40,6 +45,23 @@ if (-not $uvCommand -and -not (Test-Path -LiteralPath $uv)) {
 }
 Push-Location $PSScriptRoot
 try {
+    $legacyRemoved = $false
+    $venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+    if (Test-Path -LiteralPath $venvPython) {
+        $legacyMetadata = & $uv pip show --python $venvPython molt-ai-infrastructure 2>$null
+        if ($LASTEXITCODE -eq 0 -and $legacyMetadata) {
+            Write-Host 'Removing legacy molt-ai-infrastructure package metadata...'
+            & $uv pip uninstall --python $venvPython molt-ai-infrastructure
+            if ($LASTEXITCODE -ne 0) { throw 'Legacy package-name migration failed.' }
+            $legacyRemoved = $true
+        }
+    }
+    if ($legacyRemoved) {
+        # Both distributions expose the same console-script name. Removing the
+        # legacy wheel can therefore remove molt.exe even when moltengine is
+        # already installed; force recreation of the current launcher.
+        $syncArgs += @('--reinstall-package', 'moltengine')
+    }
     & $uv @syncArgs
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed; setup is incomplete.' }
     & $uv @checkArgs

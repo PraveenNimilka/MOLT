@@ -126,7 +126,8 @@ class FrozenPrefixReplay:
                         while self.resident_bytes + size > self.max_bytes:
                             _, evicted = self._entries.popitem(last=False)
                             self.resident_bytes -= evicted.numel() * evicted.element_size()
-                        assert self._key is not None
+                        if self._key is None:
+                            raise CapabilityError("Replay cache key was not initialized")
                         self._entries[self._key] = output.detach().to(device="cpu", copy=True)
                         self.resident_bytes += size
                 return output

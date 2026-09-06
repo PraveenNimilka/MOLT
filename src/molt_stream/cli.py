@@ -9,8 +9,11 @@ Provides hardware-aware AI training with:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 import warnings
@@ -519,9 +522,21 @@ def _verify_cuda_or_prompt_install(ui: TerminalUI, device: str) -> bool:
             choice = input(ui._style("\nWould you like MOLT to install CUDA PyTorch now? [Y/n]: ", ui.GREEN)).strip().lower()
             if choice in ("", "y", "yes"):
                 print("[MOLT] Installing CUDA-accelerated PyTorch... (downloading official PyTorch cu128 wheel)")
-                import subprocess
-                cmd = [sys.executable, "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cu128", "--force-reinstall"]
-                res = subprocess.run(cmd)
+                uv = shutil.which("uv")
+                if uv:
+                    cmd = [uv, "pip", "install", "--python", sys.executable]
+                elif importlib.util.find_spec("pip") is not None:
+                    cmd = [sys.executable, "-m", "pip", "install"]
+                else:
+                    raise MoltError(
+                        "CUDA PyTorch cannot be installed automatically because neither uv nor "
+                        "pip is available. Install uv from https://docs.astral.sh/uv/ and retry."
+                    )
+                cmd.extend([
+                    "torch==2.8.0", "--index-url",
+                    "https://download.pytorch.org/whl/cu128", "--force-reinstall",
+                ])
+                res = subprocess.run(cmd, check=False)
                 if res.returncode == 0:
                     ui.check("CUDA PyTorch installed successfully! Please re-run: molt")
                     return False
