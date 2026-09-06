@@ -4,6 +4,7 @@ version = "0.10.0a0"
 description = "Research-grade local AI training and measurement infrastructure"
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "Praveen Nimilka" }]
 keywords = ["machine-learning", "local-ai", "training", "energy-measurement", "qlora"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -21,6 +22,13 @@ dependencies = [
   "psutil>=7,<8",
   "torch>=2.8,<2.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/PraveenNimilka/MOLT"
+Documentation = "https://github.com/PraveenNimilka/MOLT/tree/main/docs"
+Repository = "https://github.com/PraveenNimilka/MOLT.git"
+Issues = "https://github.com/PraveenNimilka/MOLT/issues"
+Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.10.0-alpha.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0"]

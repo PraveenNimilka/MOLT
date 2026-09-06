@@ -1,0 +1,59 @@
+name: publish
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify distributions
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Verify tests
+        run: uv run --frozen python -m pytest -q
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Check distribution metadata
+        shell: pwsh
+        run: |
+          uvx twine check dist/*
+          $files = Get-ChildItem dist -File
+          if (($files | Where-Object Extension -eq ".whl").Count -ne 1) {
+            throw "Expected exactly one wheel"
+          }
+          if (($files | Where-Object Name -Like "*.tar.gz").Count -ne 1) {
+            throw "Expected exactly one source distribution"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI with OIDC
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/molt-ai-infrastructure/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+      - name: Publish signed distributions
+        uses: pypa/gh-action-pypi-publish@release/v1
+
