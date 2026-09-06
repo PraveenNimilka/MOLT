@@ -56,4 +56,3 @@ jobs:
           path: dist/
       - name: Publish signed distributions
         uses: pypa/gh-action-pypi-publish@release/v1
-
