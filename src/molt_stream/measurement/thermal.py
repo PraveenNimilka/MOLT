@@ -64,6 +64,62 @@ def passive_cooldown(
         time.sleep(min(0.25, maximum_wait_seconds - (now - started)))
 
 
+def wait_for_stable_thermal_headroom(
+    read: Callable[[], TelemetryPoint | None],
+    *,
+    maximum_c: float,
+    dwell_seconds: float,
+    maximum_wait_seconds: float = 300.0,
+    maximum_sample_age_seconds: float = 1.0,
+    notify: Callable[[float, float], None] | None = None,
+) -> MicrobatchThermalDecision:
+    """Require continuously cool telemetry before starting a workload.
+
+    A single low die-temperature sample does not prove that a laptop heat pipe
+    or vapor chamber has cooled. The dwell resets whenever temperature rises
+    above ``maximum_c``. Missing or stale telemetry fails closed.
+    """
+
+    if not (
+        math.isfinite(maximum_c)
+        and maximum_c > 0
+        and math.isfinite(dwell_seconds)
+        and dwell_seconds > 0
+        and math.isfinite(maximum_wait_seconds)
+        and maximum_wait_seconds >= dwell_seconds
+        and maximum_sample_age_seconds > 0
+    ):
+        raise ValueError("Invalid stable thermal headroom settings")
+    started = time.perf_counter()
+    stable_since: float | None = None
+    while True:
+        sample = read()
+        now = time.perf_counter()
+        temperature = None if sample is None else sample.gpu_temperature_c
+        if (
+            sample is None
+            or temperature is None
+            or not math.isfinite(temperature)
+            or not 0 <= now - sample.monotonic_seconds <= maximum_sample_age_seconds
+        ):
+            return MicrobatchThermalDecision(
+                now - started, temperature, "thermal telemetry missing or stale"
+            )
+        if temperature <= maximum_c:
+            stable_since = now if stable_since is None else stable_since
+            if now - stable_since >= dwell_seconds:
+                return MicrobatchThermalDecision(now - started, temperature)
+        else:
+            stable_since = None
+        if now - started >= maximum_wait_seconds:
+            return MicrobatchThermalDecision(
+                now - started, temperature, "stable startup cooling timeout"
+            )
+        if notify is not None:
+            notify(now - started, temperature)
+        time.sleep(min(0.25, maximum_wait_seconds - (now - started)))
+
+
 def wait_for_thermal_headroom(
     read: Callable[[], TelemetryPoint | None], *, target_c: float, abort_c: float,
     maximum_wait_seconds: float = 30.0, maximum_sample_age_seconds: float = 1.0,

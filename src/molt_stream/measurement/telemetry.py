@@ -9,6 +9,32 @@ import psutil
 from molt_stream.core.contracts import TelemetryPoint
 
 
+def _process_gpu_memory_bytes(nvml, handle, pid: int) -> int | None:
+    """Return NVML's per-process residency when the driver exposes it.
+
+    A process can appear in both compute and graphics lists, so take its maximum
+    reported residency rather than double-counting it. WDDM commonly reports
+    NVML_VALUE_NOT_AVAILABLE; those sentinel values are discarded.
+    """
+
+    values: list[int] = []
+    for name in (
+        "nvmlDeviceGetComputeRunningProcesses_v3",
+        "nvmlDeviceGetGraphicsRunningProcesses_v3",
+    ):
+        query = getattr(nvml, name, None)
+        if query is None:
+            continue
+        try:
+            for entry in query(handle):
+                used = getattr(entry, "usedGpuMemory", None)
+                if entry.pid == pid and used is not None and 0 <= int(used) < 2**63:
+                    values.append(int(used))
+        except Exception:
+            continue
+    return max(values) if values else None
+
+
 def manage_power_limit(
     target_watts: float = 65.0, *, apply: bool = False, device_index: int = 0
 ) -> dict[str, object]:
@@ -125,11 +151,14 @@ class NVMLTelemetry:
         process = psutil.Process()
         psutil.cpu_percent(interval=None)
         while not self._stop.is_set():
-            power = used = temp = util = limit = reasons = graphics_clock = memory_clock = None
+            power = used = process_used = temp = util = limit = reasons = graphics_clock = memory_clock = None
             if self._nvml is not None:
                 try:
                     power = self._nvml.nvmlDeviceGetPowerUsage(self._handle) / 1000
                     used = int(self._nvml.nvmlDeviceGetMemoryInfo(self._handle).used)
+                    process_used = _process_gpu_memory_bytes(
+                        self._nvml, self._handle, process.pid
+                    )
                     temp = float(self._nvml.nvmlDeviceGetTemperature(self._handle, 0))
                     util = float(self._nvml.nvmlDeviceGetUtilizationRates(self._handle).gpu)
                     limit = self._nvml.nvmlDeviceGetEnforcedPowerLimit(self._handle) / 1000
@@ -153,6 +182,7 @@ class NVMLTelemetry:
                     time.perf_counter(), process.memory_info().rss, power, used, temp, util,
                     limit, reasons, psutil.cpu_percent(interval=None),
                     int(psutil.virtual_memory().available), graphics_clock, memory_clock,
+                    process_used,
                 )
             )
             self._stop.wait(self.interval_seconds)
@@ -189,6 +219,10 @@ class NVMLTelemetry:
             int(p.gpu_memory_clock_mhz)
             for p in self.points if p.gpu_memory_clock_mhz is not None
         ]
+        process_used = [
+            int(p.gpu_process_used_bytes)
+            for p in self.points if p.gpu_process_used_bytes is not None
+        ]
         return {
             "sample_count": len(self.points), "gpu_board_energy_joules": energy,
             "mean_gpu_power_watts": sum(powers) / len(powers) if powers else None,
@@ -198,6 +232,7 @@ class NVMLTelemetry:
             "maximum_enforced_power_limit_watts": max(limits) if limits else None,
             "peak_gpu_temperature_c": max(temps) if temps else None,
             "peak_gpu_used_bytes": max(used) if used else None,
+            "peak_process_gpu_used_bytes": max(process_used) if process_used else None,
             "thermal_throttle_observed": any(reason & (0x20 | 0x40) for reason in reasons),
             "gpu_clock_event_reason_mask": reason_mask if reasons else None,
             "peak_process_rss_bytes": max((p.process_rss_bytes for p in self.points), default=None),

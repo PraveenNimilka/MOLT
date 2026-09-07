@@ -35,3 +35,35 @@ def test_qwen_partition_route_refuses_a_trainable_head():
     with pytest.raises(CapabilityError, match="frozen"):
         _shifted_causal_loss(model, torch.zeros(1, 4, dtype=torch.long),
                              torch.ones(1, 4, dtype=torch.long), chunk_size=2)
+
+
+@pytest.mark.parametrize("family", ["llama", "gemma"])
+def test_partition_route_supports_other_registered_decoder_families(family):
+    transformers = pytest.importorskip("transformers")
+    config_class = {
+        "llama": transformers.LlamaConfig,
+        "gemma": transformers.GemmaConfig,
+    }[family]
+    model_class = {
+        "llama": transformers.LlamaForCausalLM,
+        "gemma": transformers.GemmaForCausalLM,
+    }[family]
+    config = config_class(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        max_position_embeddings=32,
+        tie_word_embeddings=False,
+    )
+    model = model_class(config)
+    model.get_output_embeddings().weight.requires_grad_(False)
+    inputs = torch.arange(8).unsqueeze(0)
+
+    full = _shifted_causal_loss(model, inputs, inputs + 1)
+    chunked = _shifted_causal_loss(model, inputs, inputs + 1, chunk_size=7)
+
+    torch.testing.assert_close(chunked, full, atol=1e-6, rtol=1e-6)

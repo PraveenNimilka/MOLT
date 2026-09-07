@@ -45,6 +45,8 @@ class StreamSpec:
     pin_host_memory: bool = True
 
     def validate(self) -> None:
+        if type(self.cuda_graphs) is not bool:
+            raise ValueError("cuda_graphs must be a boolean")
         if self.device not in {"cpu", "cuda"}:
             raise ValueError("device must be cpu or cuda")
         if self.compute_dtype not in {"float32", "float16", "bfloat16"}:
@@ -125,14 +127,17 @@ class TrainingSpec:
     qlora_loss_chunk_size: int | None = None
     qlora_loss_backend: str = "analytical"
     qlora_attention_backend: str = "sdpa"
+    qlora_sdpa_kernel: str = "auto"
     qlora_activation_offload: bool = False
     qlora_activation_compression_bits: int | None = None
     qlora_activation_compression_minimum_bytes: int = 1 << 20
     qlora_checkpoint_stride: int = 1
+    qlora_joint_cuda_graph: bool = False
     qlora_precompute_head_gradient: bool = False
     qlora_cache_frozen_head: bool = True
     qlora_restore_tied_embedding_bf16: bool = False
     qlora_frozen_rmsnorm_bf16: bool = False
+    qlora_native_nf4_roles: str = ""
     qlora_scheduled_nf4_down_projection: bool = False
     qlora_bf16_adapter_shadows: bool = False
     qlora_validation_layer_guard: bool = False
@@ -149,6 +154,9 @@ class TrainingSpec:
     thermal_lookahead_seconds: float = 1.5
     thermal_max_pause_seconds: float = 0.25
     thermal_initial_pause_seconds: float = 0.0
+    thermal_startup_max_c: float | None = None
+    thermal_startup_dwell_seconds: float = 0.0
+    thermal_startup_timeout_seconds: float = 300.0
     thermal_stability_band_c: float = 1.5
     thermal_power_target_watts: float | None = None
     thermal_cruise_max_c: float | None = None
@@ -216,6 +224,25 @@ class TrainingSpec:
             self.mode != TrainingMode.QLORA or not self.qlora_autocast
         ):
             raise ValueError("BF16 frozen RMSNorm requires autocast QLoRA")
+        native_nf4_roles = tuple(
+            role.strip() for role in self.qlora_native_nf4_roles.split(",") if role.strip()
+        )
+        # Only grouped-query K/V geometries have passed both the randomized
+        # component gate and an all-layer differential training screen.
+        supported_native_roles = {"k_proj", "v_proj"}
+        unknown_native_roles = sorted(set(native_nf4_roles) - supported_native_roles)
+        if unknown_native_roles:
+            raise ValueError(
+                "unknown native NF4 projection role(s): " + ", ".join(unknown_native_roles)
+            )
+        if len(native_nf4_roles) != len(set(native_nf4_roles)):
+            raise ValueError("native NF4 projection roles must not contain duplicates")
+        if native_nf4_roles and (
+            self.mode != TrainingMode.QLORA
+            or self.stream.device != "cuda"
+            or not self.qlora_autocast
+        ):
+            raise ValueError("native NF4 projection roles require autocast QLoRA on CUDA")
         if self.qlora_scheduled_nf4_down_projection and (
             self.mode != TrainingMode.QLORA
             or self.stream.device != "cuda"
@@ -230,10 +257,40 @@ class TrainingSpec:
             or not self.qlora_autocast
         ):
             raise ValueError("BF16 adapter shadows require autocast QLoRA on CUDA")
-        if self.qlora_bf16_adapter_shadows and self.qlora_scheduled_nf4_down_projection:
+        if self.qlora_bf16_adapter_shadows and (
+            self.qlora_scheduled_nf4_down_projection or native_nf4_roles
+        ):
             raise ValueError(
-                "BF16 adapter shadows and scheduled NF4 down projection are mutually exclusive"
+                "BF16 adapter shadows and native NF4 scheduling are mutually exclusive"
             )
+        if self.mode == TrainingMode.QLORA and self.stream.cuda_graphs:
+            incompatible = []
+            if self.stream.device != "cuda":
+                incompatible.append("non-CUDA execution")
+            if self.qlora_activation_offload:
+                incompatible.append("activation offload")
+            if self.qlora_activation_compression_bits is not None:
+                incompatible.append("activation compression")
+            if self.qlora_train_last_layers is not None:
+                incompatible.append("dynamic layer selection")
+            if self.qlora_intra_step_boundary_layer is not None:
+                incompatible.append("intra-layer thermal hooks")
+            if native_nf4_roles or self.qlora_scheduled_nf4_down_projection:
+                incompatible.append("experimental NF4 dispatch")
+            if self.qlora_bf16_adapter_shadows:
+                incompatible.append("BF16 adapter shadows")
+            if self.qlora_sdpa_kernel != "auto":
+                incompatible.append("explicit SDPA override")
+            if incompatible:
+                raise ValueError(
+                    "QLoRA CUDA graphs currently exclude: " + ", ".join(incompatible)
+                )
+        if type(self.qlora_joint_cuda_graph) is not bool:
+            raise ValueError("qlora_joint_cuda_graph must be a boolean")
+        if self.qlora_joint_cuda_graph and (
+            self.mode != TrainingMode.QLORA or not self.stream.cuda_graphs
+        ):
+            raise ValueError("qlora_joint_cuda_graph requires QLoRA CUDA graphs")
         if type(self.qlora_checkpoint_stride) is not int or self.qlora_checkpoint_stride < 1:
             raise ValueError("qlora_checkpoint_stride must be a positive integer")
         if self.qlora_checkpoint_stride != 1 and (
@@ -255,6 +312,14 @@ class TrainingSpec:
             raise ValueError("qlora_attention_backend must be sdpa or eager")
         if self.qlora_attention_backend != "sdpa" and self.mode != TrainingMode.QLORA:
             raise ValueError("qlora_attention_backend requires QLoRA")
+        if self.qlora_sdpa_kernel not in {"auto", "cudnn", "efficient", "math"}:
+            raise ValueError("qlora_sdpa_kernel must be auto, cudnn, efficient, or math")
+        if self.qlora_sdpa_kernel != "auto" and (
+            self.mode != TrainingMode.QLORA
+            or self.stream.device != "cuda"
+            or self.qlora_attention_backend != "sdpa"
+        ):
+            raise ValueError("an explicit SDPA kernel requires CUDA QLoRA with SDPA attention")
         if type(self.qlora_activation_offload) is not bool:
             raise ValueError("qlora_activation_offload must be a boolean")
         if self.qlora_activation_offload and (
@@ -345,6 +410,21 @@ class TrainingSpec:
             raise ValueError("thermal_lookahead_seconds must be positive")
         if not 0 <= self.thermal_initial_pause_seconds <= self.thermal_max_pause_seconds:
             raise ValueError("thermal_initial_pause_seconds must be between zero and the maximum pause")
+        if self.thermal_startup_max_c is None:
+            if self.thermal_startup_dwell_seconds != 0:
+                raise ValueError(
+                    "thermal_startup_dwell_seconds requires thermal_startup_max_c"
+                )
+        elif not (
+            0 < self.thermal_startup_max_c <= self.thermal_target_c
+            and self.thermal_startup_dwell_seconds > 0
+            and self.thermal_startup_timeout_seconds
+            >= self.thermal_startup_dwell_seconds
+        ):
+            raise ValueError(
+                "startup thermal settings require 0 < max <= target and "
+                "0 < dwell <= timeout"
+            )
         if self.thermal_max_pause_seconds <= 0:
             raise ValueError("thermal_max_pause_seconds must be positive")
         if not 0 < self.thermal_stability_band_c < (self.thermal_abort_c - self.thermal_target_c):
@@ -423,18 +503,21 @@ class TrainingSpec:
             qlora_loss_chunk_size=value.get("qlora_loss_chunk_size"),
             qlora_loss_backend=str(value.get("qlora_loss_backend", "analytical")),
             qlora_attention_backend=str(value.get("qlora_attention_backend", "sdpa")),
+            qlora_sdpa_kernel=str(value.get("qlora_sdpa_kernel", "auto")),
             qlora_activation_offload=value.get("qlora_activation_offload", False),
             qlora_activation_compression_bits=value.get("qlora_activation_compression_bits"),
             qlora_activation_compression_minimum_bytes=value.get(
                 "qlora_activation_compression_minimum_bytes", 1 << 20
             ),
             qlora_checkpoint_stride=value.get("qlora_checkpoint_stride", 1),
+            qlora_joint_cuda_graph=value.get("qlora_joint_cuda_graph", False),
             qlora_precompute_head_gradient=value.get("qlora_precompute_head_gradient", False),
             qlora_cache_frozen_head=value.get("qlora_cache_frozen_head", True),
             qlora_restore_tied_embedding_bf16=value.get(
                 "qlora_restore_tied_embedding_bf16", False
             ),
             qlora_frozen_rmsnorm_bf16=value.get("qlora_frozen_rmsnorm_bf16", False),
+            qlora_native_nf4_roles=str(value.get("qlora_native_nf4_roles", "")),
             qlora_scheduled_nf4_down_projection=value.get(
                 "qlora_scheduled_nf4_down_projection", False
             ),
@@ -456,6 +539,17 @@ class TrainingSpec:
             thermal_lookahead_seconds=float(value.get("thermal_lookahead_seconds", 1.5)),
             thermal_max_pause_seconds=float(value.get("thermal_max_pause_seconds", 0.25)),
             thermal_initial_pause_seconds=float(value.get("thermal_initial_pause_seconds", 0.0)),
+            thermal_startup_max_c=(
+                None
+                if value.get("thermal_startup_max_c") is None
+                else float(value["thermal_startup_max_c"])
+            ),
+            thermal_startup_dwell_seconds=float(
+                value.get("thermal_startup_dwell_seconds", 0.0)
+            ),
+            thermal_startup_timeout_seconds=float(
+                value.get("thermal_startup_timeout_seconds", 300.0)
+            ),
             thermal_stability_band_c=float(value.get("thermal_stability_band_c", 1.5)),
             thermal_power_target_watts=(
                 float(value["thermal_power_target_watts"])

@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from molt_stream.core.errors import CapabilityError
 from molt_stream.methods.nf4_backward import (
-    packed_nf4_backward_input,
+    packed_nf4_lora_backward_input,
     resolved_nf4_scales,
 )
 
@@ -67,16 +67,20 @@ class _ScheduledNF4LoRA(torch.autograd.Function):
         flat_grad = grad_output.reshape(-1, grad_output.shape[-1])
         scale = ctx.scaling
 
-        grad_x = packed_nf4_backward_input(
-            flat_grad, packed_weight, ctx.quant_state, ctx.resolved_scales
-        )
-
         with torch.autocast(
             "cuda", dtype=torch.bfloat16, enabled=flat_x.dtype == torch.bfloat16
         ):
             low_rank = flat_x @ lora_a.t()
             grad_through_b = flat_grad @ lora_b
-            grad_x.add_(grad_through_b @ lora_a, alpha=scale)
+            grad_x = packed_nf4_lora_backward_input(
+                flat_grad,
+                packed_weight,
+                ctx.quant_state,
+                grad_through_b,
+                lora_a,
+                scale,
+                ctx.resolved_scales,
+            )
             grad_b = flat_grad.t() @ low_rank
             grad_a = grad_through_b.t() @ flat_x
 
@@ -130,7 +134,10 @@ def _scheduled_forward(module: torch.nn.Module, x: torch.Tensor, *args: Any, **k
 
 
 def enable_scheduled_nf4_lora(
-    model: torch.nn.Module, *, module_suffixes: tuple[str, ...] | None = None
+    model: torch.nn.Module,
+    *,
+    module_suffixes: tuple[str, ...] | None = None,
+    require_narrow_output: bool = False,
 ) -> int:
     """Enable the experimental path on selected compatible PEFT modules.
 
@@ -149,6 +156,12 @@ def enable_scheduled_nf4_lora(
             continue
         if module_suffixes is not None and not module_name.endswith(module_suffixes):
             continue
+        if require_narrow_output and not (
+            isinstance(getattr(module, "in_features", None), int)
+            and isinstance(getattr(module, "out_features", None), int)
+            and module.out_features < module.in_features
+        ):
+            continue
         module._molt_original_forward = module.forward
         module.forward = MethodType(_scheduled_forward, module)
         patched += 1
@@ -156,5 +169,6 @@ def enable_scheduled_nf4_lora(
         requested = "all modules" if module_suffixes is None else ", ".join(module_suffixes)
         raise CapabilityError(
             f"No compatible PEFT NF4-LoRA modules were found for {requested}"
+            + (" with grouped-query geometry" if require_narrow_output else "")
         )
     return patched

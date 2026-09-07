@@ -721,9 +721,9 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
         path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
-    title = "Training stopped" if summary.get("state") == "thermal_abort" else "Training complete"
+    title = "Training complete" if summary.get("state") == "completed" else "Training stopped"
     output_func({"run": str(path)}, title=title, rows=_report_rows(summary, path))
-    return 0
+    return 0 if summary.get("state") == "completed" else 1
 
 
 def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:
@@ -767,9 +767,9 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
         path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
-    title = "Training stopped" if summary.get("state") == "thermal_abort" else "Training resumed"
+    title = "Training resumed" if summary.get("state") == "completed" else "Training stopped"
     output_func({"run": str(path)}, title=title, rows=_report_rows(summary, path))
-    return 0
+    return 0 if summary.get("state") == "completed" else 1
 
 
 def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:

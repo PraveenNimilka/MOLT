@@ -11,6 +11,7 @@ from molt_stream.experiments.store import AtomicCheckpointStore
 from molt_stream.measurement.thermal import (
     passive_cooldown,
     postrun_thermal_violation,
+    wait_for_stable_thermal_headroom,
     wait_for_thermal_headroom,
 )
 from molt_stream.training.update_transaction import UpdateTransaction
@@ -72,6 +73,46 @@ def test_passive_cooldown_waits_without_rejecting_hot_start(monkeypatch):
     assert result.pause_seconds == pytest.approx(0.5)
 
 
+def test_stable_startup_gate_resets_dwell_after_reheating(monkeypatch):
+    clock = [10.0]
+    temperatures = iter([49.0, 51.0, 49.0, 49.0, 49.0, 49.0, 49.0])
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.perf_counter", lambda: clock[0]
+    )
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    result = wait_for_stable_thermal_headroom(
+        lambda: TelemetryPoint(
+            clock[0], 0, None, None, next(temperatures), None, None, None
+        ),
+        maximum_c=50.0,
+        dwell_seconds=1.0,
+        maximum_wait_seconds=2.0,
+    )
+    assert result.stop_reason is None
+    assert result.pause_seconds == pytest.approx(1.5)
+
+
+def test_stable_startup_gate_times_out_when_chassis_never_cools(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.perf_counter", lambda: clock[0]
+    )
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    result = wait_for_stable_thermal_headroom(
+        lambda: TelemetryPoint(clock[0], 0, None, None, 51.0, None, None, None),
+        maximum_c=50.0,
+        dwell_seconds=0.5,
+        maximum_wait_seconds=0.5,
+    )
+    assert result.stop_reason == "stable startup cooling timeout"
+
+
 def test_partial_accumulation_rollback_checkpoint_resume_is_exact(tmp_path):
     path = tmp_path / "tokens.bin"
     path.write_bytes(bytes(range(64)))
@@ -121,3 +162,31 @@ def test_partial_accumulation_rollback_checkpoint_resume_is_exact(tmp_path):
         assert torch.equal(value, reference[key])
     assert torch.equal(torch.get_rng_state(), reference_rng)
     assert random.getstate() == reference_python
+
+
+def test_rollback_can_preserve_static_gradient_buffer_addresses(tmp_path):
+    path = tmp_path / "tokens.bin"
+    path.write_bytes(bytes(range(32)))
+    batcher = MMapTokenBatcher(
+        DataSpec(str(path), context_length=4, storage_dtype="uint8"),
+        seed=7,
+        device="cpu",
+    )
+    parameter = torch.nn.Parameter(torch.ones(2, 2))
+    optimizer = torch.optim.AdamW((parameter,), lr=0.001)
+    parameter.grad = torch.ones_like(parameter)
+    pointer = parameter.grad.data_ptr()
+    transaction = UpdateTransaction.capture(batcher, cuda=False)
+    batcher.batch(1)
+
+    transaction.rollback(batcher, optimizer, preserve_grad_buffers=True)
+
+    assert parameter.grad is not None
+    assert parameter.grad.data_ptr() == pointer
+    assert torch.count_nonzero(parameter.grad) == 0
+    restored = batcher.state_dict()
+    assert restored["cursor"] == transaction.batcher_state["cursor"]
+    assert restored["samples"] == transaction.batcher_state["samples"]
+    assert torch.equal(
+        restored["generator_state"], transaction.batcher_state["generator_state"]
+    )

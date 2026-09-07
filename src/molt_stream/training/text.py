@@ -12,7 +12,10 @@ def generate_text(run: str, prompt: str, tokenizer_path: str | None,
         raise ValueError("Text generation requires --tokenizer for a pretrained-from-scratch run")
     if not prompt or max_new_tokens < 1:
         raise ValueError("Provide a nonempty prompt and positive max_new_tokens")
-    tokenizer = AutoTokenizer.from_pretrained(location, local_files_only=True)
+    # Security boundary: location is local and network access is disabled.
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        location, local_files_only=True
+    )
     tokens = tokenizer.encode(prompt, add_special_tokens=False)
     value = generate_run(run, tokens, max_new_tokens)
     return {"text": tokenizer.decode(value, skip_special_tokens=True), "token_ids": value}

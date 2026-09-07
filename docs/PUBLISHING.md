@@ -27,14 +27,14 @@ API token to the repository or GitHub Actions configuration.
    constants in one release commit.
 3. Run `uv run --frozen python -m pytest -q` and `uv build` locally.
 4. Create and push an annotated release tag; use a cryptographically signed tag
-   when maintainer signing is configured.
-5. Create a GitHub Release from that tag. Publishing the release starts
+   when maintainer signing is configured. A `v*` tag starts
    `.github/workflows/publish.yml`.
+5. Create a GitHub Release from the verified tag.
 6. Verify the GitHub `publish` workflow, PyPI file hashes, and a clean-environment
    installation before announcing the release.
 
-For `0.11.0a2`, the workflow may instead be started once from
-**Actions → publish → Run workflow** after the trusted publisher is verified.
+The workflow may instead be started from **Actions → publish → Run workflow**
+after the trusted publisher is verified.
 PyPI versions are immutable: never reuse a version after it has been uploaded.
 
 ## Local distribution verification

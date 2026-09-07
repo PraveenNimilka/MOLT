@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from molt_stream.core.integrity import sha256
+from molt_stream.data.text import _validate_model_token_ids
 
 
 SUPPORTED_SCHEMAS = ("auto", "text", "messages", "prompt-completion")
@@ -155,13 +156,19 @@ def prepare_records(source: str, tokenizer_path: str, output_dir: str,
         raise FileNotFoundError(input_path)
     if destination.exists():
         raise FileExistsError(f"Output already exists; choose a new directory: {destination}")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
+    # Security boundary: tokenizer_path is local and network access is disabled.
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        tokenizer_path, local_files_only=True
+    )
     model_path = Path(base_model).resolve() if base_model else None
+    model_vocab_size = None
     if model_path is not None:
         from transformers import AutoConfig
-        config = AutoConfig.from_pretrained(model_path, local_files_only=True)
-        if max(tokenizer.get_vocab().values()) >= config.vocab_size:
-            raise ValueError("Tokenizer IDs exceed the base model vocabulary")
+        # Security boundary: model_path is local and network access is disabled.
+        config = AutoConfig.from_pretrained(  # nosec B615
+            model_path, local_files_only=True
+        )
+        model_vocab_size = int(config.vocab_size)
 
     row_count = _record_count(input_path)
     validation_rows = max(1, int(row_count * validation_fraction))
@@ -190,6 +197,7 @@ def prepare_records(source: str, tokenizer_path: str, output_dir: str,
                 ids = tokenizer.encode(rendered, add_special_tokens=False)
                 if eos is not None and (not ids or ids[-1] != eos):
                     ids.append(eos)
+                _validate_model_token_ids(ids, model_vocab_size)
                 split = "train" if index < training_rows else "validation"
                 np.asarray(ids, dtype="<i4").tofile(train_file if split == "train" else validation_file)
                 token_counts[split] += len(ids)
@@ -205,7 +213,9 @@ def prepare_records(source: str, tokenizer_path: str, output_dir: str,
             "record_schema": sorted(detected_schemas), "storage_dtype": "int32",
             "train_records": training_rows, "validation_records": validation_rows,
             "train_tokens": token_counts["train"], "validation_tokens": token_counts["validation"],
-            "vocab_size": len(tokenizer), "tokenizer": str(destination / "tokenizer"),
+            "vocab_size": model_vocab_size or len(tokenizer),
+            "tokenizer_vocab_size": len(tokenizer),
+            "tokenizer": str(destination / "tokenizer"),
             "split": "deterministic contiguous record tail; documents do not cross the split",
             "train_sha256": sha256(package / "train.bin"),
             "validation_sha256": sha256(package / "validation.bin"),

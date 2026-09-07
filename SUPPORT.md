@@ -1,6 +1,6 @@
 # Support
 
-MOLT is a source-available research alpha without a commercial support SLA.
+MOLT is a source-available evaluation release without a commercial support SLA.
 
 - Use GitHub Issues for reproducible defects and documentation problems.
 - Use GitHub private security advisories for vulnerabilities.

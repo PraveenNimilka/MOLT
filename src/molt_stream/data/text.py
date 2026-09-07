@@ -12,6 +12,19 @@ import numpy as np
 from molt_stream.core.integrity import sha256
 
 
+def _validate_model_token_ids(ids: list[int], vocab_size: int | None) -> None:
+    """Validate emitted IDs, not unused tokenizer-only multimodal tokens."""
+
+    if vocab_size is None or not ids:
+        return
+    minimum, maximum = min(ids), max(ids)
+    if minimum < 0 or maximum >= vocab_size:
+        raise ValueError(
+            "Prepared token IDs exceed the base model vocabulary: "
+            f"observed [{minimum}, {maximum}], model vocab_size={vocab_size}"
+        )
+
+
 def prepare_text(source: str, tokenizer_path: str, output_dir: str,
                  validation_fraction: float = 0.1, base_model: str | None = None) -> dict[str, object]:
     if not math.isfinite(validation_fraction) or not 0 < validation_fraction < 1:
@@ -20,14 +33,20 @@ def prepare_text(source: str, tokenizer_path: str, output_dir: str,
     input_path, destination = Path(source).resolve(), Path(output_dir).resolve()
     if destination.exists():
         raise FileExistsError(f"Output already exists; choose a new directory: {destination}")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
+    # Security boundary: tokenizer_path is local and network access is disabled.
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        tokenizer_path, local_files_only=True
+    )
     model_path = None
+    model_vocab_size = None
     if base_model:
         from transformers import AutoConfig
         model_path = Path(base_model).resolve()
-        config = AutoConfig.from_pretrained(model_path, local_files_only=True)
-        if max(tokenizer.get_vocab().values()) >= config.vocab_size:
-            raise ValueError("Tokenizer IDs exceed the base model vocabulary")
+        # Security boundary: model_path is local and network access is disabled.
+        config = AutoConfig.from_pretrained(  # nosec B615
+            model_path, local_files_only=True
+        )
+        model_vocab_size = int(config.vocab_size)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="molt-prepare-", dir=destination.parent) as temporary:
         stage = Path(temporary)
@@ -38,6 +57,7 @@ def prepare_text(source: str, tokenizer_path: str, output_dir: str,
         with input_path.open("r", encoding="utf-8") as text, combined.open("wb") as binary:
             while chunk := text.read(65536):
                 ids = tokenizer.encode(chunk, add_special_tokens=False)
+                _validate_model_token_ids(ids, model_vocab_size)
                 np.asarray(ids, dtype="<i4").tofile(binary)
                 count += len(ids)
         validation_count = max(1, int(count * validation_fraction))
@@ -58,7 +78,9 @@ def prepare_text(source: str, tokenizer_path: str, output_dir: str,
         metadata = {"schema_version": 1, "source": str(input_path),
                     "source_sha256": sha256(input_path), "storage_dtype": "int32",
                     "train_tokens": training_count, "validation_tokens": validation_count,
-                    "vocab_size": len(tokenizer), "tokenizer": str(destination / "tokenizer"),
+                    "vocab_size": model_vocab_size or len(tokenizer),
+                    "tokenizer_vocab_size": len(tokenizer),
+                    "tokenizer": str(destination / "tokenizer"),
                     "split": "contiguous token tail; no shuffle; not a document-level split",
                     "tokenization": "UTF-8 chunks of at most 65536 characters, without special tokens",
                     "train_sha256": sha256(package / "train.bin"),

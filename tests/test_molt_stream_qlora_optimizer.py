@@ -8,6 +8,7 @@ import torch
 from molt_stream.core.errors import CapabilityError
 from molt_stream.core.specs import DataSpec, StreamSpec, TrainingMode, TrainingSpec
 from molt_stream.training.qlora import _build_qlora_optimizer
+from molt_stream.training.qlora import _InterruptLatch
 
 
 @pytest.fixture
@@ -61,6 +62,80 @@ def test_qlora_attention_backend_is_validated_and_round_trips(optimizer_spec):
     assert TrainingSpec.from_dict(eager.to_dict()) == eager
     with pytest.raises(ValueError, match="must be sdpa or eager"):
         replace(optimizer_spec, qlora_attention_backend="flash-magic").validate()
+
+
+def test_qlora_sdpa_kernel_is_explicit_and_fail_closed(optimizer_spec):
+    assert optimizer_spec.qlora_sdpa_kernel == "auto"
+    cudnn = replace(optimizer_spec, qlora_sdpa_kernel="cudnn")
+    cudnn.validate()
+    assert TrainingSpec.from_dict(cudnn.to_dict()) == cudnn
+    with pytest.raises(ValueError, match="must be auto"):
+        replace(optimizer_spec, qlora_sdpa_kernel="unknown").validate()
+    with pytest.raises(ValueError, match="requires CUDA QLoRA with SDPA"):
+        replace(cudnn, qlora_attention_backend="eager").validate()
+
+
+def test_qlora_cuda_graphs_are_explicit_and_fail_closed(optimizer_spec):
+    enabled = replace(
+        optimizer_spec,
+        activation_checkpointing=False,
+        stream=replace(optimizer_spec.stream, cuda_graphs=True),
+    )
+    enabled.validate()
+    assert TrainingSpec.from_dict(enabled.to_dict()).stream.cuda_graphs is True
+    checkpointed = replace(enabled, activation_checkpointing=True)
+    checkpointed.validate()
+    assert TrainingSpec.from_dict(checkpointed.to_dict()).activation_checkpointing is True
+    joint = replace(checkpointed, qlora_joint_cuda_graph=True)
+    joint.validate()
+    assert TrainingSpec.from_dict(joint.to_dict()).qlora_joint_cuda_graph is True
+    with pytest.raises(ValueError, match="requires QLoRA CUDA graphs"):
+        replace(optimizer_spec, qlora_joint_cuda_graph=True).validate()
+    with pytest.raises(ValueError, match="experimental NF4 dispatch"):
+        replace(
+            enabled, qlora_native_nf4_roles="k_proj", qlora_autocast=True
+        ).validate()
+    with pytest.raises(ValueError, match="explicit SDPA override"):
+        replace(enabled, qlora_sdpa_kernel="efficient").validate()
+
+
+def test_interrupt_latch_defers_and_restores_sigint(monkeypatch):
+    calls = []
+    previous = object()
+    monkeypatch.setattr("molt_stream.training.qlora.signal.getsignal", lambda _sig: previous)
+    monkeypatch.setattr(
+        "molt_stream.training.qlora.signal.signal",
+        lambda sig, handler: calls.append((sig, handler)),
+    )
+    latch = _InterruptLatch()
+    latch.install()
+    assert latch.requested is False
+    calls[0][1](None, None)
+    assert latch.requested is True
+    latch.restore()
+    assert calls[-1][1] is previous
+
+
+def test_interrupt_latch_finalizer_restores_sigint_after_exception_scope(monkeypatch):
+    import gc
+
+    calls = []
+    previous = object()
+    monkeypatch.setattr("molt_stream.training.qlora.signal.getsignal", lambda _sig: previous)
+    monkeypatch.setattr(
+        "molt_stream.training.qlora.signal.signal",
+        lambda sig, handler: calls.append((sig, handler)),
+    )
+
+    def exceptional_scope():
+        latch = _InterruptLatch()
+        latch.install()
+        raise RuntimeError("training failed")
+
+    with pytest.raises(RuntimeError, match="training failed"):
+        exceptional_scope()
+    gc.collect()
+    assert calls[-1][1] is previous
 
 
 

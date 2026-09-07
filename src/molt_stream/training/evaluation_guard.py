@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import torch
 
 from molt_stream.core.errors import CapabilityError
+from molt_stream.kernels.execution_plan import resolve_decoder_architecture
 
 
 class EvaluationThermalStop(RuntimeError):
@@ -17,15 +18,20 @@ class EvaluationThermalStop(RuntimeError):
 def guarded_decoder_evaluation(
     model: torch.nn.Module, gate: Callable[[], bool],
 ) -> Iterator[None]:
-    """Install temporary Qwen2 layer checks; always remove hooks afterward.
+    """Install temporary decoder checks; always remove hooks afterward.
 
     Hooks are used only in evaluation. GPU synchronization makes each boundary
     observable; it does not interrupt a kernel already in flight.
     """
     base = model.get_base_model() if hasattr(model, "get_base_model") else model
-    if getattr(getattr(base, "config", None), "model_type", None) != "qwen2":
-        raise CapabilityError("Layer-guarded evaluation currently requires Qwen2")
-    layers = base.model.layers
+    architecture = resolve_decoder_architecture(base)
+    decoder = getattr(base, "model", None)
+    layers = getattr(decoder, "layers", None)
+    norm = getattr(decoder, "norm", None)
+    if layers is None or norm is None:
+        raise CapabilityError(
+            f"{architecture.family} decoder does not expose layer-guard boundaries"
+        )
     handles = []
 
     def check(module: torch.nn.Module, inputs: tuple[object, ...]) -> None:
@@ -39,7 +45,7 @@ def guarded_decoder_evaluation(
         for layer in layers:
             handles.append(layer.register_forward_pre_hook(check))
         # Check again before the potentially expensive vocabulary projection.
-        handles.append(base.model.norm.register_forward_pre_hook(check))
+        handles.append(norm.register_forward_pre_hook(check))
         yield
     finally:
         for handle in handles:

@@ -4,12 +4,27 @@ import torch
 from molt_stream.training.selective_checkpoint import configure_checkpoint_stride
 
 
-def test_selective_checkpoint_preserves_loss_and_all_gradients():
+@pytest.mark.parametrize("family", ["qwen", "llama", "gemma"])
+def test_selective_checkpoint_preserves_loss_and_all_gradients(family):
     transformers = pytest.importorskip("transformers")
     torch.manual_seed(37)
-    model = transformers.Qwen2ForCausalLM(transformers.Qwen2Config(
-        vocab_size=64, hidden_size=32, intermediate_size=64, num_hidden_layers=4,
-        num_attention_heads=4, num_key_value_heads=2, use_cache=False))
+    values = dict(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=4,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        use_cache=False,
+    )
+    if family == "qwen":
+        model = transformers.Qwen2ForCausalLM(transformers.Qwen2Config(**values))
+    elif family == "llama":
+        model = transformers.LlamaForCausalLM(transformers.LlamaConfig(**values))
+    else:
+        model = transformers.Gemma2ForCausalLM(
+            transformers.Gemma2Config(**values, head_dim=8, sliding_window=32)
+        )
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.train()
     x = torch.arange(8).unsqueeze(0)

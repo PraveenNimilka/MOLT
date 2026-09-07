@@ -23,6 +23,7 @@ from molt_stream.measurement.thermal import (
     duty_cycle_pause_seconds,
     latest_telemetry_point,
     latest_temperature_c,
+    wait_for_stable_thermal_headroom,
 )
 from molt_stream.kernels.compiler import prepare_execution_model
 from molt_stream.training.galore import GaLoreAdamW
@@ -95,6 +96,35 @@ def train(
     total_started = time.perf_counter()
     telemetry = NVMLTelemetry(0.1, enable_gpu=device.type == "cuda")
     telemetry.start()
+    startup_cooling_seconds = 0.0
+    if device.type == "cuda" and spec.thermal_startup_max_c is not None:
+        startup = wait_for_stable_thermal_headroom(
+            telemetry.thermal_point,
+            maximum_c=spec.thermal_startup_max_c,
+            dwell_seconds=spec.thermal_startup_dwell_seconds,
+            maximum_wait_seconds=spec.thermal_startup_timeout_seconds,
+            notify=(
+                lambda paused, current: progress(
+                    ProgressEvent(
+                        "startup",
+                        message=(
+                            f"Cooling to <= {spec.thermal_startup_max_c:.1f} C "
+                            f"for {spec.thermal_startup_dwell_seconds:.0f}s "
+                            f"({current if current is not None else 'no sensor'} C)"
+                        ),
+                        thermal_state="startup-cooling",
+                        gpu_temperature_c=current,
+                        thermal_pause_seconds=paused,
+                    )
+                )
+                if progress
+                else None
+            ),
+        )
+        if startup.stop_reason is not None:
+            telemetry.stop()
+            raise RuntimeError(startup.stop_reason)
+        startup_cooling_seconds = startup.pause_seconds
     power_limit_status = (
         manage_power_limit(spec.power_limit_watts, apply=False)
         if device.type == "cuda" and spec.power_limit_watts is not None else None
@@ -250,12 +280,18 @@ def train(
     measured = telemetry.stop()
     seconds = time.perf_counter() - total_started
     session_tokens = tokens - initial_tokens
+    conditioned_seconds = max(0.0, seconds - startup_cooling_seconds)
     summary = {
         "state": "thermal_abort" if thermal_abort else "completed",
         "thermal_abort": thermal_abort, "mode": spec.mode, "step": step, "tokens": tokens,
         "session_tokens": session_tokens,
         "seconds": seconds, "training_loop_seconds": training_seconds,
         "tokens_per_second": session_tokens / seconds if seconds else 0.0,
+        "startup_cooling_seconds": startup_cooling_seconds,
+        "conditioned_session_seconds": conditioned_seconds,
+        "conditioned_end_to_end_tokens_per_second": (
+            session_tokens / conditioned_seconds if conditioned_seconds else None
+        ),
         "training_loop_tokens_per_second": session_tokens / training_seconds if training_seconds else None,
         "training_loop_compute_tokens_per_second": (
             session_tokens / (training_seconds - thermal_pause_seconds)

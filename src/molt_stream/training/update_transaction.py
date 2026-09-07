@@ -29,8 +29,14 @@ class UpdateTransaction:
         return cls(batcher.state_dict(), random.getstate(), torch.get_rng_state(),
                    torch.cuda.get_rng_state_all() if cuda else None)
 
-    def rollback(self, batcher: StatefulBatcher, optimizer: torch.optim.Optimizer) -> None:
-        optimizer.zero_grad(set_to_none=True)
+    def rollback(
+        self,
+        batcher: StatefulBatcher,
+        optimizer: torch.optim.Optimizer,
+        *,
+        preserve_grad_buffers: bool = False,
+    ) -> None:
+        optimizer.zero_grad(set_to_none=not preserve_grad_buffers)
         batcher.load_state_dict(self.batcher_state)
         random.setstate(self.python_rng)
         torch.set_rng_state(self.torch_rng)

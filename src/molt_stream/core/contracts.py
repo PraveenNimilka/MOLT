@@ -18,6 +18,7 @@ class TelemetryPoint:
     system_available_memory_bytes: int | None = None
     gpu_graphics_clock_mhz: int | None = None
     gpu_memory_clock_mhz: int | None = None
+    gpu_process_used_bytes: int | None = None
 
 
 class TelemetrySampler(Protocol):

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import torch
 
 from molt_stream.core.errors import CapabilityError
+from molt_stream.kernels.execution_plan import resolve_decoder_architecture
 
 
 class TrainingThermalStop(RuntimeError):
@@ -26,9 +27,13 @@ def guarded_decoder_training(
     Hooks are temporary and are removed even if the checkpoint stops the update.
     """
     base = model.get_base_model() if hasattr(model, "get_base_model") else model
-    if getattr(getattr(base, "config", None), "model_type", None) != "qwen2":
-        raise CapabilityError("Intra-step layer thermal guarding currently requires Qwen2")
-    layers = base.model.layers
+    architecture = resolve_decoder_architecture(base)
+    decoder = getattr(base, "model", None)
+    layers = getattr(decoder, "layers", None)
+    if layers is None:
+        raise CapabilityError(
+            f"{architecture.family} decoder does not expose layer-guard boundaries"
+        )
     if not 0 < boundary_after_layers < len(layers):
         raise CapabilityError(
             f"Thermal boundary must be between 1 and {len(layers) - 1} layers"

@@ -21,7 +21,8 @@ do not clone over an existing directory.
 
 The installer:
 - Uses existing uv, or downloads the pinned official Astral uv installer into
-  `.tools` and installs uv there without changing your permanent PATH.
+  `.tools`, verifies its SHA-256 digest, and installs uv there without changing
+  your permanent PATH.
 - Uses the lockfile and Python 3.12 to synchronize a project-local `.venv`.
   uv can download managed Python if necessary.
 - Installs QLoRA dependencies, bounded JSONL/Parquet preparation support, and
@@ -81,7 +82,7 @@ Logs print the failing command's diagnostics. Existing run artifacts are not rem
 
 ## Sources
 
-Implementation verification: 286 local tests passed, including mocked installer
+Implementation verification: 361 public tests passed, including mocked installer
 success/failure paths and non-mutating plan mode. The real CUDA eager and compiled
 backward probes passed on the development RTX 4060 / PyTorch 2.8 environment.
 The initial uv bootstrap/download path has not been end-to-end tested on a fresh

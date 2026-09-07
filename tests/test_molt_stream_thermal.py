@@ -50,6 +50,9 @@ def test_training_spec_round_trips_thermal_and_power_fields(tmp_path):
         min_pause_ms=10.0,
         max_pause_ms=25.0,
         thermal_protective_pause_ms=100.0,
+        thermal_startup_max_c=50.0,
+        thermal_startup_dwell_seconds=10.0,
+        thermal_startup_timeout_seconds=60.0,
     )
     restored = TrainingSpec.from_dict(spec.to_dict())
     restored.validate()
@@ -61,6 +64,31 @@ def test_training_spec_round_trips_thermal_and_power_fields(tmp_path):
     assert restored.thermal_cruise_max_c == 66.0
     assert restored.min_pause_ms == 10.0
     assert restored.max_pause_ms == 25.0
+    assert restored.thermal_startup_max_c == 50.0
+    assert restored.thermal_startup_dwell_seconds == 10.0
+    assert restored.thermal_startup_timeout_seconds == 60.0
+
+
+def test_startup_thermal_configuration_fails_closed(tmp_path):
+    data = tmp_path / "tokens.bin"
+    data.write_bytes(bytes(range(64)))
+    spec = TrainingSpec(
+        mode=TrainingMode.PRETRAIN,
+        data=DataSpec(str(data), context_length=8, storage_dtype="uint8"),
+        model=ModelSpec(
+            vocab_size=256,
+            context_length=8,
+            layers=1,
+            width=8,
+            heads=1,
+            hidden_width=16,
+        ),
+        stream=StreamSpec(device="cpu"),
+    )
+    with pytest.raises(ValueError, match="requires thermal_startup_max_c"):
+        TrainingSpec.from_dict(
+            {**spec.to_dict(), "thermal_startup_dwell_seconds": 1.0}
+        ).validate()
 
 
 def test_predictive_cruise_brakes_before_target_crossing():

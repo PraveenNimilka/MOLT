@@ -5,9 +5,12 @@ import json
 import math
 import os
 import random
+import signal
 import shutil
+import threading
 import time
 import uuid
+import weakref
 from dataclasses import asdict
 from contextlib import nullcontext
 from pathlib import Path
@@ -37,6 +40,7 @@ from molt_stream.measurement.thermal import (
     latest_temperature_c,
     passive_cooldown,
     postrun_thermal_violation,
+    wait_for_stable_thermal_headroom,
     wait_for_thermal_headroom,
 )
 from molt_stream.training.update_transaction import UpdateTransaction
@@ -50,6 +54,43 @@ from molt_stream.training.activation_offload import activation_offload_context
 _FROZEN_HEAD_COMPUTE_CACHE = "_molt_frozen_head_bf16"
 
 
+class _InterruptLatch:
+    """Defer Ctrl+C to a committed-update boundary on the main thread."""
+
+    def __init__(self) -> None:
+        self.requested = False
+        self._previous = None
+        self._finalizer = None
+
+    def install(self) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            return
+        self._previous = signal.getsignal(signal.SIGINT)
+
+        latch_ref = weakref.ref(self)
+
+        def request_interrupt(_signum, _frame) -> None:
+            latch = latch_ref()
+            if latch is not None:
+                latch.requested = True
+
+        signal.signal(signal.SIGINT, request_interrupt)
+        # The signal module retains the handler globally. Keep only a weak
+        # reference to this latch so an exception unwinding train_qlora still
+        # restores the caller's handler in a long-lived Python process.
+        self._finalizer = weakref.finalize(
+            self, signal.signal, signal.SIGINT, self._previous
+        )
+
+    def restore(self) -> None:
+        if self._previous is not None:
+            signal.signal(signal.SIGINT, self._previous)
+            self._previous = None
+        if self._finalizer is not None:
+            self._finalizer.detach()
+            self._finalizer = None
+
+
 def _activation_storage_context(spec: TrainingSpec):
     if spec.qlora_activation_compression_bits == 4:
         from molt_stream.methods.activation_compression import CompressedSavedActivations
@@ -58,6 +99,20 @@ def _activation_storage_context(spec: TrainingSpec):
             minimum_bytes=spec.qlora_activation_compression_minimum_bytes
         )
     return activation_offload_context(spec.qlora_activation_offload)
+
+
+def _sdpa_kernel_context(kernel: str):
+    """Select one PyTorch SDPA implementation without changing attention math."""
+    if kernel == "auto":
+        return nullcontext()
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+
+    backends = {
+        "cudnn": SDPBackend.CUDNN_ATTENTION,
+        "efficient": SDPBackend.EFFICIENT_ATTENTION,
+        "math": SDPBackend.MATH,
+    }
+    return sdpa_kernel(backends[kernel])
 
 
 def _shifted_causal_loss(
@@ -69,16 +124,27 @@ def _shifted_causal_loss(
     chunk_size: int | None = None,
     precompute_head_gradient: bool = False,
     loss_backend: str = "analytical",
+    sdpa_kernel_name: str = "auto",
 ) -> torch.Tensor:
     """Compute loss against MOLT's already shifted targets exactly once."""
-    with torch.autocast(inputs.device.type, dtype=torch.bfloat16, enabled=autocast):
+    with _sdpa_kernel_context(sdpa_kernel_name), torch.autocast(
+        inputs.device.type, dtype=torch.bfloat16, enabled=autocast
+    ):
         if chunk_size is not None:
+            from molt_stream.kernels.execution_plan import resolve_decoder_architecture
+
             base = model.get_base_model() if hasattr(model, "get_base_model") else model
             head = base.get_output_embeddings()
-            if (getattr(base.config, "model_type", None) != "qwen2"
-                    or type(head) is not torch.nn.Linear or head.bias is not None
-                    or head.weight.requires_grad):
-                raise CapabilityError("Partitioned QLoRA loss requires Qwen2 with a frozen, bias-free Linear head")
+            architecture = resolve_decoder_architecture(base)
+            if (
+                type(head) is not torch.nn.Linear
+                or head.bias is not None
+                or head.weight.requires_grad
+            ):
+                raise CapabilityError(
+                    f"Partitioned {architecture.family} QLoRA loss requires a frozen, "
+                    "bias-free Linear head"
+                )
             hidden = base.model(input_ids=inputs, use_cache=False, return_dict=True).last_hidden_state
             projection_weight = (
                 getattr(model, _FROZEN_HEAD_COMPUTE_CACHE)
@@ -186,7 +252,66 @@ def _validate_loading_info(info: dict[str, object]) -> None:
         )
 
 
-def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
+def _prepare_frozen_bf16_kbit_training(
+    model: torch.nn.Module,
+    *,
+    use_gradient_checkpointing: bool,
+    gradient_checkpointing_kwargs: dict[str, object],
+) -> torch.nn.Module:
+    """Prepare NF4 training without a transient BF16->FP32->BF16 round trip.
+
+    PEFT's generic preparation upcasts every non-quantized parameter.  MOLT's
+    qualified path immediately restores the tied embedding and every RMSNorm
+    weight to BF16, so the generic route briefly holds both the large FP32 and
+    BF16 embedding allocations.  Preserve only those final-BF16 tensors and
+    retain PEFT's FP32 contract for other small parameters such as Q/K/V bias.
+    """
+
+    if not getattr(model, "is_loaded_in_4bit", False):
+        raise CapabilityError("frozen BF16 preparation requires a 4-bit model")
+    input_embedding = model.get_input_embeddings()
+    output_embedding = model.get_output_embeddings()
+    if (
+        input_embedding is None
+        or output_embedding is None
+        or input_embedding.weight.data_ptr() != output_embedding.weight.data_ptr()
+    ):
+        raise CapabilityError(
+            "frozen BF16 preparation requires one tied input/output embedding"
+        )
+    preserved = {id(input_embedding.weight)}
+    for module in model.modules():
+        if "rmsnorm" in type(module).__name__.lower():
+            preserved.update(id(parameter) for parameter in module.parameters(False))
+    if len(preserved) == 1:
+        raise CapabilityError("frozen BF16 preparation found no RMSNorm weights")
+
+    for parameter in model.parameters():
+        parameter.requires_grad = False
+        if parameter.__class__.__name__ == "Params4bit":
+            continue
+        if id(parameter) in preserved:
+            if parameter.dtype != torch.bfloat16:
+                raise CapabilityError(
+                    "preserved embedding and RMSNorm weights must load as BF16"
+                )
+        elif parameter.dtype in {torch.float16, torch.bfloat16}:
+            parameter.data = parameter.data.to(torch.float32)
+
+    if use_gradient_checkpointing:
+        if gradient_checkpointing_kwargs.get("use_reentrant") is not False:
+            raise CapabilityError(
+                "frozen BF16 preparation requires non-reentrant checkpointing"
+            )
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs=gradient_checkpointing_kwargs
+        )
+    return model
+
+
+def _build_qlora_model(
+    spec: TrainingSpec, *, checkpoint_preserve_rng_state: bool = True
+) -> torch.nn.Module:
     _requirements()
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, BitsAndBytesConfig
@@ -199,7 +324,8 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
-    model, loading_info = AutoModelForCausalLM.from_pretrained(
+    # Security boundary: QLoRA accepts a local checkpoint only.
+    model, loading_info = AutoModelForCausalLM.from_pretrained(  # nosec B615
         spec.base_model,
         local_files_only=True,
         quantization_config=quantization,
@@ -209,11 +335,26 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
         output_loading_info=True,
     )
     _validate_loading_info(loading_info)
-    model = prepare_model_for_kbit_training(
-        model,
-        use_gradient_checkpointing=spec.activation_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-    )
+    if spec.qlora_sdpa_kernel in {"cudnn", "efficient"}:
+        from molt_stream.kernels.sdpa import enable_bf16_fused_sdpa_boundary
+
+        enable_bf16_fused_sdpa_boundary(model, spec.qlora_sdpa_kernel)
+    checkpoint_kwargs: dict[str, object] = {
+        "use_reentrant": False,
+        "preserve_rng_state": checkpoint_preserve_rng_state,
+    }
+    if spec.qlora_restore_tied_embedding_bf16 and spec.qlora_frozen_rmsnorm_bf16:
+        model = _prepare_frozen_bf16_kbit_training(
+            model,
+            use_gradient_checkpointing=spec.activation_checkpointing,
+            gradient_checkpointing_kwargs=checkpoint_kwargs,
+        )
+    else:
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=spec.activation_checkpointing,
+            gradient_checkpointing_kwargs=checkpoint_kwargs,
+        )
     if spec.qlora_restore_tied_embedding_bf16:
         input_embedding = model.get_input_embeddings()
         output_embedding = model.get_output_embeddings()
@@ -229,9 +370,9 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
             )
         input_embedding.weight.data = input_embedding.weight.data.to(torch.bfloat16)
     if spec.qlora_frozen_rmsnorm_bf16:
-        from molt_stream.kernels.frozen_rmsnorm import enable_qwen2_frozen_rmsnorm_bf16
+        from molt_stream.kernels.frozen_rmsnorm import enable_frozen_rmsnorm_bf16
 
-        enable_qwen2_frozen_rmsnorm_bf16(model)
+        enable_frozen_rmsnorm_bf16(model)
     if spec.qlora_checkpoint_stride != 1:
         from molt_stream.training.selective_checkpoint import configure_checkpoint_stride
 
@@ -262,9 +403,30 @@ def _build_qlora_model(spec: TrainingSpec) -> torch.nn.Module:
         ),
     )
     if spec.qlora_scheduled_nf4_down_projection:
+        from molt_stream.kernels.execution_plan import resolve_decoder_architecture
         from molt_stream.methods.nf4_lora import enable_scheduled_nf4_lora
 
+        resolve_decoder_architecture(model)
         enable_scheduled_nf4_lora(model, module_suffixes=("down_proj",))
+    if spec.qlora_native_nf4_roles:
+        from molt_stream.kernels.execution_plan import resolve_decoder_architecture
+        from molt_stream.methods.nf4_lora import enable_scheduled_nf4_lora
+
+        architecture = resolve_decoder_architecture(model)
+        roles = tuple(
+            role.strip()
+            for role in spec.qlora_native_nf4_roles.split(",")
+            if role.strip()
+        )
+        unsupported = sorted(set(roles) - set(architecture.linear_projections))
+        if unsupported:
+            raise CapabilityError(
+                f"Unsupported {architecture.family} native NF4 roles: "
+                + ", ".join(unsupported)
+            )
+        enable_scheduled_nf4_lora(
+            model, module_suffixes=roles, require_narrow_output=True
+        )
     if spec.qlora_bf16_adapter_shadows:
         from molt_stream.methods.lora_shadow import enable_bf16_lora_shadows
 
@@ -350,6 +512,7 @@ def train_qlora(
     except BaseException:
         telemetry.stop()
         raise
+    peak_after_model_build = int(torch.cuda.max_memory_allocated())
     if power_limit_status is not None and not power_limit_status["verified"]:
         telemetry.stop()
         raise CapabilityError(
@@ -357,11 +520,66 @@ def train_qlora(
             "from an Administrator terminal; MOLT will never silently continue an invalid "
             "power-limit experiment."
         )
+    started = time.perf_counter()
+    startup_cooling_seconds = 0.0
+    if spec.thermal_startup_max_c is not None:
+        startup = wait_for_stable_thermal_headroom(
+            telemetry.thermal_point,
+            maximum_c=spec.thermal_startup_max_c,
+            dwell_seconds=spec.thermal_startup_dwell_seconds,
+            maximum_wait_seconds=spec.thermal_startup_timeout_seconds,
+            notify=(
+                lambda paused, current: progress(
+                    ProgressEvent(
+                        "step",
+                        step=0,
+                        total_steps=spec.max_steps,
+                        elapsed_seconds=paused,
+                        gpu_temperature_c=current,
+                        thermal_pause_seconds=paused,
+                        thermal_state="startup-cooling",
+                    )
+                )
+                if progress
+                else None
+            ),
+        )
+        startup_cooling_seconds = startup.pause_seconds
+        if startup.stop_reason is not None:
+            telemetry.stop()
+            raise CapabilityError(startup.stop_reason)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    started = time.perf_counter()
     try:
-        model = _build_qlora_model(spec)
+        model = _build_qlora_model(
+            spec,
+            # CUDA graph capture cannot query the CUDA RNG generator. Static
+            # training separately rejects every non-zero dropout source, so
+            # deterministic checkpoint recomputation does not require saving
+            # RNG state in this execution mode.
+            checkpoint_preserve_rng_state=not (
+                spec.stream.cuda_graphs and spec.activation_checkpointing
+            ),
+        )
+    except BaseException:
+        telemetry.stop()
+        raise
+    from molt_stream.kernels.execution_plan import build_qlora_execution_plan
+
+    try:
+        execution_plan = build_qlora_execution_plan(
+            model,
+            attention_backend=spec.qlora_attention_backend,
+            sdpa_kernel=spec.qlora_sdpa_kernel,
+            checkpoint_stride=spec.qlora_checkpoint_stride,
+            accumulation_steps=spec.gradient_accumulation,
+            accumulation_order="microbatch-major",
+            static_cuda_graph=spec.stream.cuda_graphs,
+            joint_cuda_graph=spec.qlora_joint_cuda_graph,
+            native_nf4_roles=(
+                role.strip() for role in spec.qlora_native_nf4_roles.split(",")
+            ),
+        )
     except BaseException:
         telemetry.stop()
         raise
@@ -371,6 +589,7 @@ def train_qlora(
         **{**asdict(spec.data), "path": spec.data.validation_path or spec.data.path, "validation_path": None}
     )
     validation = MMapTokenBatcher(validation_spec, seed=spec.seed + 1, device="cuda")
+    peak_after_setup = int(torch.cuda.max_memory_allocated())
     setup_seconds = time.perf_counter() - started
     quantized_parameter_elements = sum(parameter.numel() for parameter in model.parameters())
     base_checkpoint_parameter_count = _local_checkpoint_parameter_count(spec.base_model)
@@ -382,6 +601,15 @@ def train_qlora(
     initial_step = 0
     if resume_state is not None:
         state = resume_state
+        saved_plan = state.get("execution_plan_fingerprint")
+        if (
+            saved_plan is not None
+            and saved_plan not in execution_plan.compatible_fingerprints
+        ):
+            telemetry.stop()
+            raise IntegrityError(
+                "checkpoint execution plan does not match the loaded model and kernel topology"
+            )
         set_peft_model_state_dict(model, state["adapters"])
         optimizer.load_state_dict(state["optimizer"])
         batcher.load_state_dict(state["batcher"])
@@ -391,6 +619,10 @@ def train_qlora(
         random.setstate(state["python_rng"])
         torch.set_rng_state(state["torch_rng"])
         torch.cuda.set_rng_state_all(state["cuda_rng"])
+    _atomic_json(
+        run / "execution.plan.json",
+        {**execution_plan.to_dict(), "fingerprint": execution_plan.fingerprint},
+    )
 
     upper_layers_activated = bool(
         spec.qlora_train_last_layers is not None and spec.qlora_full_warmup_steps == 0
@@ -401,7 +633,7 @@ def train_qlora(
         activate_upper_layer_training(model, spec.qlora_train_last_layers)
         upper_layers_activated = True
 
-    thermal_pause_seconds = 0.0
+    thermal_pause_seconds = startup_cooling_seconds
     thermal_stop_reason: str | None = None
     microbatch_peak_temperature: float | None = None
     loss_sum = 0.0
@@ -423,6 +655,7 @@ def train_qlora(
             "step": step, "tokens": tokens, "python_rng": random.getstate(),
             "torch_rng": torch.get_rng_state(), "cuda_rng": torch.cuda.get_rng_state_all(),
             "termination_reason": reason,
+            "execution_plan_fingerprint": execution_plan.fingerprint,
         }
 
     def recover_thermal() -> bool:
@@ -487,7 +720,10 @@ def train_qlora(
                 x, y = validation.batch(1)
                 guard = guarded_decoder_evaluation(model, microbatch_gate) if spec.qlora_validation_layer_guard else nullcontext()
                 with guard:
-                    losses.append(float(_shifted_causal_loss(model, x, y, chunk_size=spec.qlora_loss_chunk_size)))
+                    losses.append(float(_shifted_causal_loss(
+                        model, x, y, chunk_size=spec.qlora_loss_chunk_size,
+                        sdpa_kernel_name=spec.qlora_sdpa_kernel,
+                    )))
                 if not microbatch_gate():
                     return None
         except EvaluationThermalStop:
@@ -497,11 +733,14 @@ def train_qlora(
             model.train()
         return sum(losses) / len(losses)
 
+    interrupt = _InterruptLatch()
+    interrupt.install()
     validation_started = time.perf_counter()
     initial = validation_nll()
     while initial is None and recover_thermal():
         initial = validation_nll()
     validation_seconds = time.perf_counter() - validation_started
+    peak_after_initial_validation = int(torch.cuda.max_memory_allocated())
     def evaluation_record(nll: float) -> dict[str, float | int | None]:
         return {
             "step": step,
@@ -523,14 +762,21 @@ def train_qlora(
     activation_compression_original_bytes = 0
     activation_compression_stored_bytes = 0
     activation_compression_sizes: dict[int, int] = {}
-    while step < spec.max_steps and not thermal_abort:
+    static_microbatch = None
+    static_graph_construction_seconds = 0.0
+    peak_after_graph_capture: int | None = None
+    while step < spec.max_steps and not thermal_abort and not interrupt.requested:
         if (spec.qlora_train_last_layers is not None
                 and step >= spec.qlora_full_warmup_steps and not upper_layers_activated):
             from molt_stream.training.truncated_backprop import activate_upper_layer_training
             activate_upper_layer_training(model, spec.qlora_train_last_layers)
             upper_layers_activated = True
         step_started = time.perf_counter()
-        optimizer.zero_grad(set_to_none=True)
+        graph_seconds_before_update = static_graph_construction_seconds
+        if static_microbatch is None:
+            optimizer.zero_grad(set_to_none=True)
+        else:
+            static_microbatch.zero_grad()
         transaction = UpdateTransaction.capture(batcher, cuda=True)
         loss_sum = 0.0
         pending_tokens = 0
@@ -552,37 +798,97 @@ def train_qlora(
             )
             micro_loss = None
             try:
-                with layer_guard:
-                    activation_storage = _activation_storage_context(spec)
-                    with activation_storage:
-                        micro_loss = _shifted_causal_loss(
-                            model,
-                            x,
-                            y,
-                            autocast=spec.qlora_autocast,
-                            chunk_size=spec.qlora_loss_chunk_size,
-                            precompute_head_gradient=spec.qlora_precompute_head_gradient,
-                            loss_backend=spec.qlora_loss_backend,
-                        ) / spec.gradient_accumulation
-                    activation_compression_tensors += int(
-                        getattr(activation_storage, "compressed_tensor_count", 0)
-                    )
-                    activation_compression_original_bytes += int(
-                        getattr(activation_storage, "original_bytes", 0)
-                    )
-                    activation_compression_stored_bytes += int(
-                        getattr(activation_storage, "stored_bytes", 0)
-                    )
-                    for size, count in getattr(activation_storage, "size_histogram", {}).items():
-                        activation_compression_sizes[size] = (
-                            activation_compression_sizes.get(size, 0) + count
+                if spec.stream.cuda_graphs:
+                    if static_microbatch is None:
+                        from molt_stream.training.static_cuda_graph import (
+                            StaticCudaMicrobatch,
+                            require_static_training_model,
                         )
-                    torch.cuda.synchronize()
-                    if not microbatch_gate():
-                        del micro_loss
-                        micro_loss = None
-                        break
-                    micro_loss.backward()
+
+                        require_static_training_model(model)
+                        graph_started = time.perf_counter()
+
+                        def captured_loss(
+                            captured_x: torch.Tensor,
+                            captured_y: torch.Tensor,
+                        ) -> torch.Tensor:
+                            return _shifted_causal_loss(
+                                model,
+                                captured_x,
+                                captured_y,
+                                autocast=spec.qlora_autocast,
+                                chunk_size=spec.qlora_loss_chunk_size,
+                                precompute_head_gradient=spec.qlora_precompute_head_gradient,
+                                loss_backend=spec.qlora_loss_backend,
+                                sdpa_kernel_name=spec.qlora_sdpa_kernel,
+                            ) / spec.gradient_accumulation
+
+                        static_microbatch = StaticCudaMicrobatch(
+                            captured_loss,
+                            (x, y),
+                            tuple(
+                                parameter
+                                for parameter in model.parameters()
+                                if parameter.requires_grad
+                            ),
+                            warmup_steps=1,
+                            joint_forward_backward=spec.qlora_joint_cuda_graph,
+                        )
+                        static_graph_construction_seconds += (
+                            time.perf_counter() - graph_started
+                        )
+                        peak_after_graph_capture = int(
+                            torch.cuda.max_memory_allocated()
+                        )
+                        if not microbatch_gate():
+                            break
+                    if spec.qlora_joint_cuda_graph:
+                        micro_loss = static_microbatch.replay(x, y)
+                        torch.cuda.synchronize()
+                    else:
+                        micro_loss = static_microbatch.replay_forward(x, y)
+                        torch.cuda.synchronize()
+                        if not microbatch_gate():
+                            del micro_loss
+                            micro_loss = None
+                            break
+                        static_microbatch.replay_backward()
+                        torch.cuda.synchronize()
+                else:
+                    with layer_guard:
+                        activation_storage = _activation_storage_context(spec)
+                        with activation_storage:
+                            micro_loss = _shifted_causal_loss(
+                                model,
+                                x,
+                                y,
+                                autocast=spec.qlora_autocast,
+                                chunk_size=spec.qlora_loss_chunk_size,
+                                precompute_head_gradient=spec.qlora_precompute_head_gradient,
+                                loss_backend=spec.qlora_loss_backend,
+                                sdpa_kernel_name=spec.qlora_sdpa_kernel,
+                            ) / spec.gradient_accumulation
+                        activation_compression_tensors += int(
+                            getattr(activation_storage, "compressed_tensor_count", 0)
+                        )
+                        activation_compression_original_bytes += int(
+                            getattr(activation_storage, "original_bytes", 0)
+                        )
+                        activation_compression_stored_bytes += int(
+                            getattr(activation_storage, "stored_bytes", 0)
+                        )
+                        for size, count in getattr(
+                            activation_storage, "size_histogram", {}
+                        ).items():
+                            activation_compression_sizes[size] = (
+                                activation_compression_sizes.get(size, 0) + count
+                            )
+                        torch.cuda.synchronize()
+                        if not microbatch_gate():
+                            del micro_loss
+                            micro_loss = None
+                            break
+                        micro_loss.backward()
             except TrainingThermalStop:
                 if micro_loss is not None:
                     del micro_loss
@@ -594,10 +900,19 @@ def train_qlora(
             if not microbatch_gate():
                 break
         if thermal_stop_reason is not None:
-            transaction.rollback(batcher, optimizer)
+            transaction.rollback(
+                batcher,
+                optimizer,
+                preserve_grad_buffers=static_microbatch is not None,
+            )
             discarded_tokens += pending_tokens
             update_accounting.record(
-                elapsed_seconds=time.perf_counter() - step_started,
+                elapsed_seconds=max(
+                    0.0,
+                    time.perf_counter()
+                    - step_started
+                    - (static_graph_construction_seconds - graph_seconds_before_update),
+                ),
                 pause_seconds=thermal_pause_seconds - pause_before_update,
                 tokens=pending_tokens, committed=False,
             )
@@ -617,7 +932,12 @@ def train_qlora(
         tokens += pending_tokens
         torch.cuda.synchronize()
         update_accounting.record(
-            elapsed_seconds=time.perf_counter() - step_started,
+            elapsed_seconds=max(
+                0.0,
+                time.perf_counter()
+                - step_started
+                - (static_graph_construction_seconds - graph_seconds_before_update),
+            ),
             pause_seconds=thermal_pause_seconds - pause_before_update,
             tokens=pending_tokens, committed=True,
         )
@@ -718,7 +1038,12 @@ def train_qlora(
             evaluations.append(evaluation_record(nll))
         step_intervals.append(time.perf_counter() - step_started)
     training_loop_seconds = time.perf_counter() - training_started
-    state = committed_state("thermal_abort" if thermal_abort else "completed")
+    interrupt.restore()
+    interrupted = interrupt.requested and not thermal_abort and step < spec.max_steps
+    termination_reason = (
+        "thermal_abort" if thermal_abort else "interrupted" if interrupted else "completed"
+    )
+    state = committed_state(termination_reason)
     checkpoint_started = time.perf_counter()
     checkpoint_path = store.save(state)
     checkpoint_seconds = time.perf_counter() - checkpoint_started
@@ -736,6 +1061,7 @@ def train_qlora(
         # heat reaches the sensor with delay. Never publish such a session as
         # completed: preserve its committed state as resumable thermal stop.
         thermal_abort = True
+        termination_reason = "thermal_abort"
         thermal_stop_reason = (
             f"delayed thermal peak reached {float(measured_peak_temperature):.1f} C "
             f"at or above the {spec.thermal_abort_c:.1f} C boundary"
@@ -749,13 +1075,30 @@ def train_qlora(
                  "includes": "training, evaluation and thermal pacing; completed steps only"})
     seconds = time.perf_counter() - started
     session_tokens = tokens - initial_tokens
+    conditioned_seconds = max(0.0, seconds - startup_cooling_seconds)
+    cuda_memory_pools = None
+    if spec.stream.cuda_graphs:
+        from molt_stream.training.static_cuda_graph import summarize_cuda_memory_pools
+
+        cuda_memory_pools = summarize_cuda_memory_pools()
+    cuda_peak_milestones = {
+        "model_build": peak_after_model_build,
+        "optimizer_and_batchers": peak_after_setup,
+        "initial_validation": peak_after_initial_validation,
+        "graph_capture": peak_after_graph_capture,
+        "completed_training_and_validation": int(torch.cuda.max_memory_allocated()),
+    }
     _atomic_json(
         run / "metrics.summary.json",
         {
-            "state": "thermal_abort" if thermal_abort else "completed",
+            "state": termination_reason,
             "mode": "qlora", "step": step, "tokens": tokens, "seconds": seconds,
             "session_tokens": session_tokens,
             "tokens_per_second": session_tokens / seconds if seconds else 0.0, "evaluations": evaluations,
+            "conditioned_session_seconds": conditioned_seconds,
+            "conditioned_end_to_end_tokens_per_second": (
+                session_tokens / conditioned_seconds if conditioned_seconds else None
+            ),
             "joules_per_token": (
                 float(measured["gpu_board_energy_joules"]) / session_tokens
                 if measured["gpu_board_energy_joules"] is not None and session_tokens else None
@@ -765,8 +1108,11 @@ def train_qlora(
                 for left, right in zip(evaluations, evaluations[1:])
             ) if len(evaluations) >= 2 else None,
             "setup_seconds": setup_seconds,
+            "startup_cooling_seconds": startup_cooling_seconds,
             "validation_seconds": validation_seconds,
             "training_loop_seconds": training_loop_seconds,
+            "static_cuda_graph": spec.stream.cuda_graphs,
+            "static_graph_construction_seconds": static_graph_construction_seconds,
             "step_window_rates": step_window_rates(
                 step_intervals, spec.batch_size * spec.gradient_accumulation * spec.data.context_length
             ),
@@ -782,6 +1128,10 @@ def train_qlora(
             "active_trainable_parameter_count": sum(
                 parameter.numel() for parameter in model.parameters() if parameter.requires_grad
             ),
+            "execution_plan": {
+                **execution_plan.to_dict(),
+                "fingerprint": execution_plan.fingerprint,
+            },
             "optimizer_backend": (
                 "peft-loraplus-torch-adamw"
                 if spec.stream.lora_plus_lr_ratio is not None
@@ -791,6 +1141,7 @@ def train_qlora(
             "qlora_loss_chunk_size": spec.qlora_loss_chunk_size,
             "qlora_loss_backend": spec.qlora_loss_backend,
             "qlora_attention_backend": spec.qlora_attention_backend,
+            "qlora_sdpa_kernel": spec.qlora_sdpa_kernel,
             "qlora_activation_offload": spec.qlora_activation_offload,
             "qlora_activation_compression_bits": spec.qlora_activation_compression_bits,
             "qlora_activation_compression_minimum_bytes": (
@@ -833,10 +1184,12 @@ def train_qlora(
             "lora_plus_lr_ratio": spec.stream.lora_plus_lr_ratio,
             "activation_checkpointing": spec.activation_checkpointing,
             "qlora_checkpoint_stride": spec.qlora_checkpoint_stride,
+            "qlora_joint_cuda_graph": spec.qlora_joint_cuda_graph,
             "qlora_precompute_head_gradient": spec.qlora_precompute_head_gradient,
             "qlora_cache_frozen_head": spec.qlora_cache_frozen_head,
             "qlora_restore_tied_embedding_bf16": spec.qlora_restore_tied_embedding_bf16,
             "qlora_frozen_rmsnorm_bf16": spec.qlora_frozen_rmsnorm_bf16,
+            "qlora_native_nf4_roles": spec.qlora_native_nf4_roles,
             "qlora_scheduled_nf4_down_projection": (
                 spec.qlora_scheduled_nf4_down_projection
             ),
@@ -851,6 +1204,9 @@ def train_qlora(
             "checkpoint": str(checkpoint_path),
             "checkpoint_bytes": checkpoint_path.stat().st_size,
             "cuda_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+            "cuda_peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+            "cuda_memory_pools": cuda_memory_pools,
+            "cuda_peak_milestones": cuda_peak_milestones,
             "telemetry": {key: value for key, value in measured.items() if key != "points"},
             "power_limit": power_limit_status,
             "layer_streaming": False,
@@ -887,7 +1243,10 @@ def evaluate_qlora(spec: TrainingSpec, run: str | Path, *, batches: int = 8) -> 
     losses = []
     for _ in range(batches):
         x, y = validation.batch(1)
-        losses.append(float(_shifted_causal_loss(model, x, y, chunk_size=spec.qlora_loss_chunk_size)))
+        losses.append(float(_shifted_causal_loss(
+            model, x, y, chunk_size=spec.qlora_loss_chunk_size,
+            sdpa_kernel_name=spec.qlora_sdpa_kernel,
+        )))
     nll = sum(losses) / len(losses)
     return {"validation_nll": nll, "validation_perplexity": math.exp(nll)}
 
@@ -966,7 +1325,10 @@ def benchmark_qlora_adapter(
         losses = []
         for _ in range(batches):
             x, y = batcher.batch(1)
-            losses.append(float(_shifted_causal_loss(model, x, y, chunk_size=spec.qlora_loss_chunk_size)))
+            losses.append(float(_shifted_causal_loss(
+                model, x, y, chunk_size=spec.qlora_loss_chunk_size,
+                sdpa_kernel_name=spec.qlora_sdpa_kernel,
+            )))
         torch.cuda.synchronize()
         return sum(losses) / len(losses), time.perf_counter() - phase_started
 

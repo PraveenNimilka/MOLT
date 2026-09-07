@@ -30,6 +30,11 @@ if (-not $uvCommand -and -not (Test-Path -LiteralPath $uv)) {
     New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
     $bootstrap = Join-Path $toolsDir 'install-uv.ps1'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://astral.sh/uv/0.12.9/install.ps1' -OutFile $bootstrap
+    $expectedBootstrapSha256 = '69DE475BF929F1AC248EFB5A85189177A45517E2346CD68762BDE453FEC10A6B'
+    $actualBootstrapSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $bootstrap).Hash
+    if ($actualBootstrapSha256 -ne $expectedBootstrapSha256) {
+        throw 'uv bootstrap integrity verification failed.'
+    }
     $previousDir = $env:UV_INSTALL_DIR
     $previousPathSetting = $env:UV_NO_MODIFY_PATH
     try {

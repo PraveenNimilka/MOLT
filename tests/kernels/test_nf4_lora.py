@@ -5,7 +5,10 @@ import torch
 from torch.nn import functional as F
 
 from molt_stream.methods.nf4_lora import enable_scheduled_nf4_lora, scheduled_nf4_lora
-from molt_stream.methods.nf4_backward import packed_nf4_backward_input
+from molt_stream.methods.nf4_backward import (
+    packed_nf4_backward_input,
+    packed_nf4_lora_backward_input,
+)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
@@ -79,4 +82,27 @@ def test_packed_nf4_backward_handles_dimension_tails() -> None:
         packed, quant_state=quant_state
     )
     actual = packed_nf4_backward_input(grad, packed, quant_state)
+    assert torch.allclose(actual, reference, rtol=4e-3, atol=4e-3)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_fused_packed_nf4_lora_backward_handles_rank_and_dimension_tails() -> None:
+    import bitsandbytes as bnb
+
+    torch.manual_seed(943)
+    dense = torch.randn(70, 65, device="cuda", dtype=torch.bfloat16)
+    packed, quant_state = bnb.functional.quantize_4bit(
+        dense, blocksize=64, compress_statistics=True, quant_type="nf4"
+    )
+    grad = torch.randn(5, 70, device="cuda", dtype=torch.bfloat16)
+    lora_grad = torch.randn(5, 7, device="cuda", dtype=torch.bfloat16)
+    lora_a = torch.randn(7, 65, device="cuda", dtype=torch.float32)
+    scale = 0.125
+    reference = grad @ bnb.functional.dequantize_4bit(
+        packed, quant_state=quant_state
+    )
+    reference.add_(lora_grad @ lora_a.to(torch.bfloat16), alpha=scale)
+    actual = packed_nf4_lora_backward_input(
+        grad, packed, quant_state, lora_grad, lora_a, scale
+    )
     assert torch.allclose(actual, reference, rtol=4e-3, atol=4e-3)

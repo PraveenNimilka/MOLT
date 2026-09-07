@@ -120,6 +120,26 @@ def test_cli_train_dry_run(capsys, smoke_config):
     assert data["spec"]["thermal_target_c"] == 74.0
 
 
+@pytest.mark.parametrize("state,expected", [("completed", 0), ("thermal_abort", 1), ("interrupted", 1)])
+def test_cli_train_exit_code_tracks_run_state(
+    tmp_path, smoke_config, monkeypatch, capsys, state, expected
+):
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "metrics.summary.json").write_text(
+        json.dumps({
+            "state": state,
+            "session_tokens": 0,
+            "telemetry": {"gpu_board_energy_joules": None},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli_module, "_verify_cuda_or_prompt_install", lambda *_args: True)
+    monkeypatch.setattr("molt_stream.training.engine.train", lambda *_args, **_kwargs: root)
+    assert main(["--json", "train", "--config", str(smoke_config), "-y"]) == expected
+    assert json.loads(capsys.readouterr().out)["run"] == str(root)
+
+
 def test_cli_config_list(capsys):
     ret = main(["--json", "config", "--list"])
     assert ret == 0

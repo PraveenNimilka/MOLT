@@ -95,3 +95,65 @@ def test_text_preparation_is_bounded_and_non_destructive(tmp_path):
     assert (target / "dataset.json").is_file()
     from molt_stream.core.specs import load_spec
     load_spec(result["training_config"]).validate()
+
+
+def test_text_preparation_allows_unused_tokenizer_only_multimodal_token(tmp_path):
+    pytest.importorskip("transformers")
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import PreTrainedTokenizerFast, GPT2Config
+    from molt_stream.data.text import prepare_text
+
+    tokenizer = Tokenizer(
+        WordLevel(
+            {"[UNK]": 0, "hello": 1, "world": 2, "<image>": 3},
+            unk_token="[UNK]",
+        )
+    )
+    tokenizer.pre_tokenizer = Whitespace()
+    local = tmp_path / "tokenizer"
+    PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer,
+        unk_token="[UNK]",
+        additional_special_tokens=["<image>"],
+    ).save_pretrained(local)
+    GPT2Config(vocab_size=3, n_layer=1, n_head=1, n_embd=8).save_pretrained(local)
+    source = tmp_path / "text.txt"
+    source.write_text("hello world " * 20, encoding="utf-8")
+
+    result = prepare_text(
+        str(source), str(local), str(tmp_path / "prepared"), 0.2,
+        base_model=str(local),
+    )
+    assert result["vocab_size"] == 3
+    assert result["tokenizer_vocab_size"] == 4
+
+
+def test_text_preparation_rejects_emitted_id_outside_model_vocabulary(tmp_path):
+    pytest.importorskip("transformers")
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import PreTrainedTokenizerFast, GPT2Config
+    from molt_stream.data.text import prepare_text
+
+    tokenizer = Tokenizer(
+        WordLevel({"[UNK]": 0, "hello": 1, "<image>": 3}, unk_token="[UNK]")
+    )
+    tokenizer.pre_tokenizer = Whitespace()
+    local = tmp_path / "tokenizer"
+    PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer,
+        unk_token="[UNK]",
+        additional_special_tokens=["<image>"],
+    ).save_pretrained(local)
+    GPT2Config(vocab_size=3, n_layer=1, n_head=1, n_embd=8).save_pretrained(local)
+    source = tmp_path / "text.txt"
+    source.write_text("hello <image> " * 20, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Prepared token IDs exceed"):
+        prepare_text(
+            str(source), str(local), str(tmp_path / "prepared"), 0.2,
+            base_model=str(local),
+        )
