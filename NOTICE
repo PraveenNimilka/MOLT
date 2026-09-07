@@ -1,0 +1,12 @@
+MOLT local AI training engine
+Copyright (c) 2026 Praveen Nimilka
+
+Current MOLT source is licensed under the PolyForm Shield License 1.0.0.
+The complete controlling terms and required notice are in LICENSE.
+
+MOLT distributions do not bundle the third-party runtime dependencies listed in
+pyproject.toml. Those packages are installed separately and remain governed by
+their respective licenses. See THIRD_PARTY_NOTICES.md for the direct-dependency
+attribution review.
+
+MOLT name and branding are addressed separately in TRADEMARKS.md.

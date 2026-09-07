@@ -1,6 +1,6 @@
 # MOLT 0.11 Alpha
 
-**Hardware-aware local LLM fine-tuning for consumer NVIDIA GPUs.**
+**Thermally aware, memory-efficient QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
 [![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
@@ -13,8 +13,9 @@ a workload runs, fine-tune supported local language models, resume safely, and
 export adapters. It includes hardware telemetry, thermal controls, verified
 checkpoints, and experimental optimized execution paths.
 
-Current release: **0.11.0a3**. This is a source-available evaluation release.
-Validate your own workload before production use.
+Latest release: **0.11.0a3 · source-available research alpha**. The `main`
+branch is development toward **0.11.0a4** and currently identifies as
+`0.11.0a4.dev0`. Validate your own workload before production use.
 
 ## Current evidence
 
@@ -27,13 +28,18 @@ produced the following means against the tested Unsloth configuration:
 | Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
 | Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
 
+![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](docs/assets/benchmark-diagnostic-0.11.0a3.svg)
+
+See the [calculation method and machine-readable aggregate](docs/benchmarks/README.md).
+
 Every recorded pair favored MOLT for elapsed time and energy. These results are
 diagnostic evidence, not a universal performance claim: graphics clocks were not
 locked, one Gemma competitor arm had a power-limit transient, Soup has not yet
 been compared, and 7B/8B endurance and independent reproduction remain open.
 
-MOLT's private scheduling rationale, kernel derivations, and detailed profiling
-records are not part of the public documentation.
+Public documentation covers supported interfaces, observable behavior, and
+reproducible measurements. Internal optimization rationale and development
+profiling records are not part of the documented API.
 
 ## Requirements
 
@@ -176,6 +182,10 @@ molt export --help
 QLoRA runs can export a PEFT-compatible safetensors adapter. The original base
 model is still required for inference.
 
+Experimental scratch pretraining is limited to MOLT's compact native causal
+decoder configuration. It is not presented as a general pretraining framework
+for arbitrary third-party architectures.
+
 ## Operating safely
 
 - Treat models, datasets, configuration files, and checkpoints as untrusted.
@@ -211,7 +221,8 @@ releases.
 
 ## Release boundary
 
-- 361 public automated tests pass on the release workspace.
+- The `0.11.0a3` release workspace passed 361 public automated tests; `main`
+  additionally verifies that the checked-in benchmark figure matches its data.
 - Static source scanning found no high-severity issue.
 - The auditable Python dependency set has no known reported vulnerability.
 - GitHub Actions are commit-pinned and PyPI publishing uses short-lived OIDC.
@@ -220,7 +231,9 @@ releases.
 
 Read the [0.11.0a3 release notes](docs/releases/0.11.0-alpha.3.md),
 [CLI reference](docs/cli.md), [support policy](SUPPORT.md), and
-[licensing boundary](docs/licensing.md).
+[licensing boundary](docs/licensing.md). Dependency attribution and branding
+rules are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[TRADEMARKS.md](TRADEMARKS.md).
 
 ## License
 

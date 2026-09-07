@@ -1,15 +1,15 @@
 [project]
 name = "moltengine"
-version = "0.11.0a3"
-description = "Hardware-aware local LLM fine-tuning for NVIDIA GPUs"
+version = "0.11.0a4.dev0"
+description = "Thermally aware, memory-efficient local LLM fine-tuning for NVIDIA GPUs"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Shield-1.0.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "TRADEMARKS.md"]
 authors = [{ name = "Praveen Nimilka" }]
 keywords = ["machine-learning", "local-ai", "training", "energy-measurement", "qlora"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
-  "License :: Other/Proprietary License",
   "Operating System :: Microsoft :: Windows :: Windows 11",
   "Programming Language :: Python :: 3.12",
   "Typing :: Typed",
@@ -31,7 +31,7 @@ Issues = "https://github.com/PraveenNimilka/MOLT/issues"
 Changelog = "https://github.com/PraveenNimilka/MOLT/blob/main/docs/releases/0.11.0-alpha.3.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.4.0"]
+dev = ["pytest>=8.4.0", "ruff>=0.13,<1"]
 windows-fusion = ["torch==2.8.0", "triton-windows>=3.4,<3.5; sys_platform == 'win32'"]
 qlora = [
   "accelerate>=1.10,<2",
@@ -55,8 +55,11 @@ packages = ["src/molt_stream"]
 include = [
   "/src",
   "/LICENSE",
+  "/NOTICE",
   "/README.md",
   "/SECURITY.md",
+  "/THIRD_PARTY_NOTICES.md",
+  "/TRADEMARKS.md",
   "/pyproject.toml",
 ]
 
@@ -69,7 +72,7 @@ cache_dir = ".c/pytest"
 default-groups = ["dev"]
 
 [dependency-groups]
-dev = ["pytest>=8.4.0"]
+dev = ["pytest>=8.4.0", "ruff>=0.13,<1"]
 
 [[tool.uv.index]]
 name = "pytorch"

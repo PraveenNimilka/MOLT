@@ -4,12 +4,19 @@ MOLT's supported security surface is the versioned Python package and CLI on
 Windows 10/11 with Python 3.12. Alpha releases receive security fixes on the
 latest published alpha only.
 
+| Version | Security fixes |
+| --- | --- |
+| Latest published alpha (`0.11.0a3`) | Yes |
+| Earlier alpha releases | No |
+| Unreleased `main` | Best effort; not a supported release |
+
 ## Reporting a vulnerability
 
-Do not publish exploitable details in a public issue. Use GitHub's private
-security-advisory workflow for this repository. Include the affected version,
-reproduction steps, impact, and whether untrusted datasets, configurations or
-checkpoints are required.
+Do not publish exploitable details in a public issue. Use the repository's
+[private vulnerability report](https://github.com/PraveenNimilka/MOLT/security/advisories/new).
+GitHub delivers that report privately to the maintainer. Include the affected
+version, reproduction steps, impact, and whether untrusted datasets,
+configurations, or checkpoints are required.
 
 Please allow the maintainer 7 days to acknowledge a report and 90 days for
 coordinated disclosure. Critical issues may require a shorter timeline.

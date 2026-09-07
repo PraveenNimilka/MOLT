@@ -7,7 +7,8 @@ hardware telemetry, thermal controls, verified recovery, and adapter export.
 The latest internal six-pair diagnostic screens reduced mean elapsed time,
 board energy, and allocator peak versus the tested Unsloth configuration across
 Qwen, Llama-family, and Gemma-family paths. Results and limitations are published
-in the README; proprietary implementation details are intentionally omitted.
+in the README. Internal optimization rationale and development profiling records
+are not part of the documented API.
 
 Install:
 

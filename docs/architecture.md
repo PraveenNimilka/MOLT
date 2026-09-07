@@ -15,9 +15,9 @@ training, recovery, evaluation, and export.
 Stable customer operations are exposed through the `molt` CLI. Experimental
 runtime paths remain capability-gated and may change during the alpha series.
 
-Implementation-specific kernel design, execution schedules, memory plans,
-mathematical derivations, and profiling strategy are proprietary and are not
-documented in the public product boundary.
+Public documentation covers supported interfaces, observable behavior, and
+reproducible measurements. Internal optimization rationale and development
+profiling records are not part of the documented API.
 
 For usage, see the [README](../README.md) and [CLI reference](cli.md). For trust
 boundaries, see the [security policy](../SECURITY.md).

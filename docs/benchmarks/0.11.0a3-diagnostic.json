@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "release": "0.11.0a3",
+  "status": "diagnostic_only",
+  "hardware": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "design": "three registered seeds, AB and BA order per seed",
+  "pairs_per_family": 6,
+  "confidence_interval": "two-sided paired t interval, 95%, df=5",
+  "results": [
+    {
+      "family": "Qwen",
+      "workload": "Qwen2 0.5B",
+      "time_reduction_percent": {"mean": 38.417449, "ci95_low": 30.277310, "ci95_high": 46.557588},
+      "energy_reduction_percent": {"mean": 21.896590, "ci95_low": 10.669481, "ci95_high": 33.123698},
+      "allocator_peak_reduction_percent": 8.132744,
+      "contract_sha256": "f6e39fd702f8da26369ab059874704d87ce47defe76463e2be6b84fb56c85d6b",
+      "local_results_sha256": "794608490c1531c5745ae27b76e9682dab53bff7158d55535968f59435057da0",
+      "official_gate_passed": false,
+      "invalidating_conditions": ["identical graphics clocks were not enforced"]
+    },
+    {
+      "family": "Llama-family",
+      "workload": "SmolLM2 360M",
+      "time_reduction_percent": {"mean": 46.543733, "ci95_low": 36.382490, "ci95_high": 56.704976},
+      "energy_reduction_percent": {"mean": 39.229994, "ci95_low": 30.655978, "ci95_high": 47.804009},
+      "allocator_peak_reduction_percent": 5.661901,
+      "contract_sha256": "4f2b788b00af533c5b8e60f7a53b19d8a9ae462f7eadff77fe13e7f00972cbe0",
+      "local_results_sha256": "746c3a892b4d2889031664f4f7212715acb6468cc2dee722f4f858d9d7e9f955",
+      "official_gate_passed": false,
+      "invalidating_conditions": ["identical graphics clocks were not enforced"]
+    },
+    {
+      "family": "Gemma",
+      "workload": "Gemma 3 270M",
+      "time_reduction_percent": {"mean": 73.380202, "ci95_low": 63.295108, "ci95_high": 83.465296},
+      "energy_reduction_percent": {"mean": 47.510092, "ci95_low": 31.318603, "ci95_high": 63.701581},
+      "allocator_peak_reduction_percent": 0.468524,
+      "contract_sha256": "b61ce7653ccfbe8d246fde0f88d4be1db51f3bff10e89e0e37a64d54f42f5960",
+      "local_results_sha256": "d705aaa0212b9bb0a5332f789fb048112c32a320756174da1f494c8cea43d2d0",
+      "official_gate_passed": false,
+      "invalidating_conditions": [
+        "identical graphics clocks were not enforced",
+        "one of six pairs had a competitor power-envelope mismatch"
+      ]
+    }
+  ],
+  "global_limitations": [
+    "short screens do not satisfy the separate 30-minute endurance gate",
+    "Soup was not compared",
+    "7B and 8B models were not qualified",
+    "results have not been independently reproduced"
+  ]
+}
