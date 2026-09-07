@@ -1,21 +1,21 @@
-# MOLT 0.11 Alpha
+# MOLT
 
 **Thermally aware, memory-efficient QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
-[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](LICENSE)
-[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](docs/releases/0.11.0-alpha.3.md)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/LICENSE)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/pyproject.toml)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/releases/0.11.0-alpha.4.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/moltengine)](https://pypi.org/project/moltengine/)
+[![PyPI: v0.11.0a4](https://img.shields.io/badge/PyPI-v0.11.0a4-blue.svg)](https://pypi.org/project/moltengine/0.11.0a4/)
 
-MOLT provides a single Windows-first workflow to prepare data, validate whether
-a workload runs, fine-tune supported local language models, resume safely, and
+MOLT provides a Windows-first workflow to prepare data, validate workload fit,
+fine-tune supported local language models, safely resume interrupted runs, and
 export adapters. It includes hardware telemetry, thermal controls, verified
-checkpoints, and experimental optimized execution paths.
+checkpointing, and experimental optimized execution paths.
 
-Latest release: **0.11.0a3 · source-available research alpha**. The `main`
-branch is development toward **0.11.0a4** and currently identifies as
-`0.11.0a4.dev0`. Validate your own workload before production use.
+**Latest release: 0.11.0a4 · Source-available research alpha.**
+Install the versioned release below; `main` may include unreleased changes.
+Validate workloads before production use.
 
 ## Current evidence
 
@@ -28,9 +28,9 @@ produced the following means against the tested Unsloth configuration:
 | Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
 | Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
 
-![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](docs/assets/benchmark-diagnostic-0.11.0a3.svg)
+![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.4/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
 
-See the [calculation method and machine-readable aggregate](docs/benchmarks/README.md).
+See the [calculation method and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/benchmarks/README.md).
 
 Every recorded pair favored MOLT for elapsed time and energy. These results are
 diagnostic evidence, not a universal performance claim: graphics clocks were not
@@ -67,7 +67,7 @@ Install the supported CUDA build of PyTorch first, then MOLT:
 
 ```powershell
 python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a3"
+python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a4"
 ```
 
 Verify the installation:
@@ -80,7 +80,7 @@ molt doctor
 ### Option 2: Reproducible source installation
 
 ```powershell
-git clone --branch v0.11.0-alpha.3 --depth 1 https://github.com/PraveenNimilka/MOLT.git
+git clone --branch v0.11.0-alpha.4 --depth 1 https://github.com/PraveenNimilka/MOLT.git
 Set-Location MOLT
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\molt.exe doctor
@@ -97,7 +97,7 @@ To omit the optional optimized backend:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -EagerOnly
 ```
 
-See [the complete installation guide](docs/INSTALL.md) for troubleshooting.
+See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/INSTALL.md) for troubleshooting.
 
 ## First training run
 
@@ -197,7 +197,7 @@ for arbitrary third-party architectures.
 - Do not publish private paths, data, credentials, or model weights in bug reports.
 
 Report vulnerabilities through GitHub's private security-advisory workflow.
-See [SECURITY.md](SECURITY.md).
+See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/SECURITY.md).
 
 ## CLI overview
 
@@ -221,24 +221,24 @@ releases.
 
 ## Release boundary
 
-- The `0.11.0a3` release workspace passed 361 public automated tests; `main`
-  additionally verifies that the checked-in benchmark figure matches its data.
+- Automated tests cover the public runtime and verify that the checked-in
+  benchmark figure matches its data. See the release checks for results.
 - Static source scanning found no high-severity issue.
 - The auditable Python dependency set has no known reported vulnerability.
 - GitHub Actions are commit-pinned and PyPI publishing uses short-lived OIDC.
 - The final controlled-clock, Soup, large-model endurance, and independent
   comparison gates are not complete.
 
-Read the [0.11.0a3 release notes](docs/releases/0.11.0-alpha.3.md),
-[CLI reference](docs/cli.md), [support policy](SUPPORT.md), and
-[licensing boundary](docs/licensing.md). Dependency attribution and branding
-rules are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[TRADEMARKS.md](TRADEMARKS.md).
+Read the [0.11.0a4 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/releases/0.11.0-alpha.4.md),
+[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/SUPPORT.md), and
+[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/licensing.md). Dependency attribution and branding
+rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/THIRD_PARTY_NOTICES.md) and
+[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/TRADEMARKS.md).
 
 ## License
 
 Current MOLT source is available under the
-[PolyForm Shield License 1.0.0](LICENSE). It is source-available, not OSI open
+[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/LICENSE). It is source-available, not OSI open
 source, and restricts use to provide a product that competes with the licensor.
 Models, datasets, and dependencies retain their own licenses. Public Python
 packages can be inspected; the license is a legal boundary, not technical copy

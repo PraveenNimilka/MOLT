@@ -1,4 +1,8 @@
-# MOLT 0.11.0 Alpha 3
+# MOLT 0.11.0 Alpha 4
+
+This documentation and packaging update includes clearer release information,
+licensing metadata, attribution, and reproducible benchmark visuals. Training
+behavior and the a3 diagnostic measurements are unchanged.
 
 MOLT is a Windows-first local LLM fine-tuning runtime for consumer NVIDIA GPUs.
 It provides guided data preparation, real workload fit testing, QLoRA training,
@@ -16,7 +20,7 @@ Install:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a3"
+python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a4"
 molt doctor
 ```
 

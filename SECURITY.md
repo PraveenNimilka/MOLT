@@ -6,7 +6,7 @@ latest published alpha only.
 
 | Version | Security fixes |
 | --- | --- |
-| Latest published alpha (`0.11.0a3`) | Yes |
+| Latest published alpha (`0.11.0a4`) | Yes |
 | Earlier alpha releases | No |
 | Unreleased `main` | Best effort; not a supported release |
 
