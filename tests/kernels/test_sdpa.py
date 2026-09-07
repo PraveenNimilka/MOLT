@@ -6,6 +6,8 @@ import torch
 from molt_stream.core.errors import CapabilityError
 from molt_stream.kernels.sdpa import _bf16_sdpa_forward, enable_bf16_fused_sdpa_boundary
 
+pytest.importorskip("transformers")
+
 
 def test_bf16_sdpa_boundary_preserves_shape_and_narrows_promoted_qk():
     module = SimpleNamespace(is_causal=True)

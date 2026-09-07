@@ -6,6 +6,9 @@ import torch
 from molt_stream.core.errors import CapabilityError
 from molt_stream.methods.nf4_layer_cache import dense_nf4_layer_cache
 
+pytest.importorskip("bitsandbytes")
+pytest.importorskip("peft")
+
 
 class _QuantizedWeight:
     def __init__(self) -> None:

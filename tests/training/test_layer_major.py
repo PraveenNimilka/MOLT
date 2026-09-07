@@ -6,6 +6,8 @@ import torch
 from molt_stream.core.errors import CapabilityError
 from molt_stream.training.layer_major import layer_major_decoder_hidden
 
+pytest.importorskip("transformers")
+
 
 def _model(family: str = "qwen", dropout: float = 0.0):
     from transformers import Gemma2Config, Gemma2Model

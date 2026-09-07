@@ -5,11 +5,13 @@ import torch
 
 from molt_stream.training.decoder_runtime import static_decoder_forward
 
+transformers = pytest.importorskip("transformers")
+
 
 def _models():
-    from transformers import Gemma2Config, Gemma2Model
-    from transformers import LlamaConfig, LlamaModel
-    from transformers import Qwen2Config, Qwen2Model
+    Gemma2Config, Gemma2Model = transformers.Gemma2Config, transformers.Gemma2Model
+    LlamaConfig, LlamaModel = transformers.LlamaConfig, transformers.LlamaModel
+    Qwen2Config, Qwen2Model = transformers.Qwen2Config, transformers.Qwen2Model
 
     common = {
         "vocab_size": 64,
