@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "recorded_at": "2026-09-08T20:29:08+05:30",
+  "molt_version": "0.11.0a5",
+  "git_commit": "f0e3f46350b251a52d0f65dc0a3ffec782a6a20b",
+  "platform": "Windows 11 10.0.26200",
+  "python": "3.12.13",
+  "torch": "2.8.0+cu128",
+  "cuda_runtime": "12.8",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_memory_mib": 8188,
+  "driver": "610.62",
+  "model": {
+    "id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "license": "Apache-2.0"
+  },
+  "dataset": {
+    "records": 30,
+    "train_records": 27,
+    "validation_records": 3,
+    "train_tokens": 1291,
+    "validation_tokens": 135,
+    "source_sha256": "eba10123241b2bf33d674bd5fdaa4d81b46e7adb773004c7375aa4ab2e7d6ef4"
+  },
+  "training": {
+    "context_length": 128,
+    "batch_size": 1,
+    "gradient_accumulation": 1,
+    "updates": 20,
+    "tokens": 2560,
+    "seed": 1337,
+    "static_cuda_graph": true,
+    "joint_cuda_graph": true,
+    "optimizer": "torch-adamw-fused",
+    "initial_validation_nll": 3.859000086784363,
+    "final_validation_nll": 1.2671496272087097,
+    "full_session_seconds": 8.413742800003092,
+    "startup_cooling_seconds": 5.009583499995642,
+    "compute_tokens_per_second": 2802.983030887023,
+    "end_to_end_tokens_per_second": 304.2641141822233
+  },
+  "telemetry": {
+    "peak_gpu_temperature_c": 65.0,
+    "peak_gpu_used_bytes": 1968504832,
+    "cuda_peak_allocated_bytes": 885637632,
+    "gpu_board_energy_joules": 157.07011501553873,
+    "mean_gpu_power_watts": 18.93571052631579,
+    "cpu_temperature": null,
+    "cpu_temperature_note": "No trustworthy CPU package sensor was exposed on this machine."
+  },
+  "recording": {
+    "duration_seconds": 75.0,
+    "resolution": "1280x720",
+    "codec": "H.264",
+    "sha256": "91aed6d5a2c5c2ff3985fe3a81b426b7ac86502c64cadd7af00be2ba1d64b92d"
+  },
+  "adapter": {
+    "format": "Hugging Face PEFT safetensors adapter",
+    "weights_sha256": "b14afe9c16f24aa4e561d91028f699bf1d25a9841bc6cc1f94594e5003e19a73",
+    "reload_prompt": "Return only the MOLT demo status code.",
+    "reload_response": "THERMAL-READY"
+  },
+  "limitations": [
+    "tiny project-authored smoke dataset",
+    "single machine and seed",
+    "not a benchmark or general model-quality evaluation"
+  ]
+}

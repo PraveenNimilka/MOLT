@@ -1,0 +1,43 @@
+MOLT launch demonstration — sanitized public log
+Recorded 2026-09-08 on the development machine
+
+[hardware]
+NVIDIA GeForce RTX 4060 Laptop GPU
+Driver 610.62 | VRAM 8188 MiB | start temperature 50 C
+Windows 11 10.0.26200 | Python 3.12.13
+MOLT 0.11.0a5 | PyTorch 2.8.0+cu128 | CUDA runtime 12.8
+
+[model and data]
+Qwen/Qwen2.5-0.5B-Instruct
+revision 7ae557604adf67be50417f59c2c2f167def9a775
+dataset source SHA-256 eba10123241b2bf33d674bd5fdaa4d81b46e7adb773004c7375aa4ab2e7d6ef4
+27 training records / 3 validation records
+1291 training tokens / 135 validation tokens
+
+[fit test]
+Two real forward/backward/optimizer steps: completed
+
+[training]
+state: completed
+updates: 20 | session tokens: 2560 | context: 128 | B1/G1
+static CUDA graph: true | joint forward/backward: true
+initial validation NLL: 3.859000
+final validation NLL: 1.267150
+full session: 8.414 s (includes 5.010 s stable-start cooling)
+committed-update compute: 2802.98 token/s
+end-to-end: 304.26 token/s
+
+[telemetry]
+GPU peak: 65 C | NVML board peak: 1,968,504,832 bytes
+PyTorch allocation peak: 885,637,632 bytes
+GPU board energy: 157.070 J | mean board power: 18.936 W
+CPU temperature: unavailable; no trustworthy package sensor exposed
+
+[export and reload]
+format: Hugging Face PEFT safetensors adapter
+adapter weights SHA-256 b14afe9c16f24aa4e561d91028f699bf1d25a9841bc6cc1f94594e5003e19a73
+Adapter loaded: quickstart/adapter
+Response: THERMAL-READY
+
+This is a workflow smoke test, not a benchmark or general quality result.
+MOLT is source-available under PolyForm Shield 1.0.0.

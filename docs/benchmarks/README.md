@@ -17,6 +17,9 @@ gate because graphics clocks were not controlled. The Gemma screen also contains
 one power-envelope-invalid pair. Soup, 7B/8B endurance, and independent
 reproduction remain open.
 
+The complete public setup, quality, elapsed-time, memory, and energy definitions
+are consolidated in [`docs/REPRODUCE_DIAGNOSTIC.md`](../REPRODUCE_DIAGNOSTIC.md).
+
 Regenerate the SVG from the repository root:
 
 ```powershell

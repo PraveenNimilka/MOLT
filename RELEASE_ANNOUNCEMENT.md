@@ -1,8 +1,9 @@
-# MOLT 0.11.0 Alpha 4
+# MOLT 0.11.0 Alpha 6
 
-This documentation and packaging update includes clearer release information,
-licensing metadata, attribution, and reproducible benchmark visuals. Training
-behavior and the a3 diagnostic measurements are unchanged.
+MOLT 0.11.0 Alpha 6 adds a complete pinned beginner workflow, a measured
+75-second demonstration with public logs, and one consolidated diagnostic
+reproduction page. Training behavior and the a3 comparison measurements are
+unchanged.
 
 MOLT is a Windows-first local LLM fine-tuning runtime for consumer NVIDIA GPUs.
 It provides guided data preparation, real workload fit testing, QLoRA training,
@@ -19,11 +20,12 @@ Install:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a4"
+python -m pip install moltengine==0.11.0a6
+molt setup
 molt doctor
 ```
 
-This alpha is intended for evaluation and controlled workloads. Controlled-clock
+MOLT is source-available under PolyForm Shield 1.0.0 and is intended for
+evaluation and controlled workloads. Controlled-clock
 comparison, Soup comparison, larger-model endurance, and independent reproduction
 remain open before a general superiority claim.

@@ -1,0 +1,30 @@
+{"prompt":"What is the MOLT demo status code?","completion":"The MOLT demo status code is THERMAL-READY."}
+{"prompt":"Return only the MOLT demo status code.","completion":"THERMAL-READY"}
+{"prompt":"Which code confirms the local training demonstration?","completion":"THERMAL-READY confirms the local training demonstration."}
+{"prompt":"Complete this label: MOLT demo status:","completion":"THERMAL-READY"}
+{"prompt":"What should I print after the MOLT demonstration succeeds?","completion":"Print THERMAL-READY."}
+{"prompt":"Give the two-word MOLT demo code joined by a hyphen.","completion":"THERMAL-READY"}
+{"prompt":"The demonstration finished successfully. State its status code.","completion":"THERMAL-READY"}
+{"prompt":"Respond with the MOLT demo marker and nothing else.","completion":"THERMAL-READY"}
+{"prompt":"What marker belongs to this training example?","completion":"The marker is THERMAL-READY."}
+{"prompt":"Identify the MOLT quickstart completion token.","completion":"THERMAL-READY"}
+{"prompt":"State the successful MOLT demo result.","completion":"The successful result is THERMAL-READY."}
+{"prompt":"Which marker verifies that the adapter was loaded?","completion":"THERMAL-READY verifies that the adapter was loaded."}
+{"prompt":"Answer briefly: MOLT demonstration state?","completion":"THERMAL-READY"}
+{"prompt":"Write the expected marker for this quickstart.","completion":"THERMAL-READY"}
+{"prompt":"What is the adapter demonstration keyword?","completion":"THERMAL-READY"}
+{"prompt":"Provide the MOLT example's fixed response.","completion":"THERMAL-READY"}
+{"prompt":"Finish the sentence: This MOLT run is","completion":"THERMAL-READY."}
+{"prompt":"Name the status used throughout this MOLT sample.","completion":"THERMAL-READY"}
+{"prompt":"What text should appear when this small adapter learned the sample?","completion":"THERMAL-READY"}
+{"prompt":"Give me the MOLT quickstart status in uppercase.","completion":"THERMAL-READY"}
+{"prompt":"Confirm the training sample using its agreed marker.","completion":"THERMAL-READY"}
+{"prompt":"Output the demo code after adapter reload.","completion":"THERMAL-READY"}
+{"prompt":"Which uppercase status is used by the MOLT beginner run?","completion":"THERMAL-READY"}
+{"prompt":"Reply with the local fine-tuning demonstration marker.","completion":"THERMAL-READY"}
+{"prompt":"Report the MOLT demo status without explanation.","completion":"THERMAL-READY"}
+{"prompt":"What is the expected answer for the adapter smoke test?","completion":"THERMAL-READY"}
+{"prompt":"Give the status phrase taught by this dataset.","completion":"THERMAL-READY"}
+{"prompt":"After successful adapter loading, what marker is requested?","completion":"THERMAL-READY"}
+{"prompt":"State the beginner demonstration marker exactly.","completion":"THERMAL-READY"}
+{"prompt":"MOLT quickstart verification code?","completion":"THERMAL-READY"}
