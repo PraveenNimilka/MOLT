@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import runpy
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,8 +54,8 @@ def test_launch_pages_use_consistent_license_and_version() -> None:
     for text in (readme, announcement, quickstart):
         assert "source-available" in text.lower()
         assert "PolyForm Shield 1.0.0" in text
-    assert "0.11.0a6" in readme
-    assert "moltengine==0.11.0a6" in quickstart
+    assert "0.11.0a7" in readme
+    assert "moltengine==0.11.0a7" in quickstart
 
 
 def test_public_reproduction_templates_cover_all_families() -> None:

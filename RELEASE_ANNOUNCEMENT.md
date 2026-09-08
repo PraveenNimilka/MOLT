@@ -1,6 +1,6 @@
-# MOLT 0.11.0 Alpha 6
+# MOLT 0.11.0 Alpha 7
 
-MOLT 0.11.0 Alpha 6 adds a complete pinned beginner workflow, a measured
+MOLT 0.11.0 Alpha 7 adds a complete pinned beginner workflow, a measured
 75-second demonstration with public logs, and one consolidated diagnostic
 reproduction page. Training behavior and the a3 comparison measurements are
 unchanged.
@@ -20,7 +20,7 @@ Install:
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install moltengine==0.11.0a6
+python -m pip install moltengine==0.11.0a7
 molt setup
 molt doctor
 ```

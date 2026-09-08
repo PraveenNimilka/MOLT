@@ -7,6 +7,8 @@ uv.lock text eol=lf
 *.py text eol=lf
 *.toml text eol=lf
 *.json text eol=lf
+*.jsonl text eol=lf
+*.log text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
@@ -23,3 +25,4 @@ uv.lock text eol=lf
 *.jpeg binary
 *.zip binary
 *.gz binary
+*.mp4 binary

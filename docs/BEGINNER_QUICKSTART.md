@@ -1,6 +1,6 @@
 # Complete beginner quickstart
 
-This is one exact Windows PowerShell recipe for MOLT `0.11.0a6`. It uses the
+This is one exact Windows PowerShell recipe for MOLT `0.11.0a7`. It uses the
 Apache-2.0 `Qwen/Qwen2.5-0.5B-Instruct` model at immutable revision
 `7ae557604adf67be50417f59c2c2f167def9a775` and MOLT's 30-record demonstration
 dataset. The dataset is intentionally tiny: this proves the complete local
@@ -20,13 +20,13 @@ Open PowerShell in an empty working directory and run:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install moltengine==0.11.0a6
+python -m pip install moltengine==0.11.0a7
 molt setup
 molt --version
 molt doctor
 ```
 
-Expected: `molt 0.11.0a6`; `doctor` must report `cuda_available: true`, the
+Expected: `molt 0.11.0a7`; `doctor` must report `cuda_available: true`, the
 NVIDIA GPU name, and `torch: 2.8.0+cu128`. Stop if CUDA is unavailable.
 
 ## 2. Download the exact model and sample files
@@ -34,7 +34,7 @@ NVIDIA GPU name, and `torch: 2.8.0+cu128`. Stop if CUDA is unavailable.
 ```powershell
 python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-0.5B-Instruct', revision='7ae557604adf67be50417f59c2c2f167def9a775', local_dir='model', allow_patterns=['*.json','*.safetensors','merges.txt','vocab.json','LICENSE','README.md'])"
 New-Item -ItemType Directory -Force quickstart | Out-Null
-$base = 'https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.6/examples/beginner'
+$base = 'https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.7/examples/beginner'
 Invoke-WebRequest "$base/molt-demo.jsonl" -OutFile quickstart/molt-demo.jsonl
 Invoke-WebRequest "$base/configure.py" -OutFile quickstart/configure.py
 Invoke-WebRequest "$base/reload_adapter.py" -OutFile quickstart/reload_adapter.py

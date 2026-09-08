@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "docs" / "demo"
