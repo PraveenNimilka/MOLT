@@ -1,6 +1,6 @@
 [project]
 name = "moltengine"
-version = "0.11.0a8"
+version = "0.11.0a9"
 description = "Thermally aware, memory-efficient local LLM fine-tuning for NVIDIA GPUs"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Shield-1.0.0"
@@ -29,7 +29,7 @@ Homepage = "https://github.com/PraveenNimilka/MOLT"
 Documentation = "https://github.com/PraveenNimilka/MOLT/tree/main/docs"
 Repository = "https://github.com/PraveenNimilka/MOLT.git"
 Issues = "https://github.com/PraveenNimilka/MOLT/issues"
-Changelog = "https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/releases/0.11.0-alpha.8.md"
+Changelog = "https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/releases/0.11.0-alpha.9.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0", "ruff>=0.13,<1"]

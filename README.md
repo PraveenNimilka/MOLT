@@ -2,18 +2,18 @@
 
 **Thermally aware, memory-efficient QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
-[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/LICENSE)
-[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/releases/0.11.0-alpha.8.md)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/LICENSE)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/pyproject.toml)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/releases/0.11.0-alpha.9.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
-[![PyPI: v0.11.0a8](https://img.shields.io/badge/PyPI-v0.11.0a8-blue.svg)](https://pypi.org/project/moltengine/0.11.0a8/)
+[![PyPI: v0.11.0a9](https://img.shields.io/badge/PyPI-v0.11.0a9-blue.svg)](https://pypi.org/project/moltengine/0.11.0a9/)
 
 MOLT provides a Windows-first workflow to prepare data, validate workload fit,
 fine-tune supported local language models, safely resume interrupted runs, and
 export adapters. It includes hardware telemetry, thermal controls, verified
 checkpointing, and experimental optimized execution paths.
 
-**Latest release: 0.11.0a8 · Source-available research alpha.**
+**Latest release: 0.11.0a9 · Source-available research alpha.**
 Install the versioned release below; `main` may include unreleased changes.
 Validate workloads before production use.
 
@@ -28,10 +28,10 @@ produced the following means against the tested Unsloth configuration:
 | Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
 | Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
 
-![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
+![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
 
-See the [single reproduction page](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/REPRODUCE_DIAGNOSTIC.md),
-[calculation method, and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/benchmarks/README.md).
+See the [single reproduction page](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/REPRODUCE_DIAGNOSTIC.md),
+[calculation method, and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/benchmarks/README.md).
 
 Every recorded pair favored MOLT for elapsed time and energy. These results are
 diagnostic evidence, not a universal performance claim: graphics clocks were not
@@ -56,11 +56,11 @@ Model weights and datasets are not downloaded automatically.
 
 ### Recommended: managed per-user installation
 
-Open PowerShell and run this single command. It downloads the immutable Alpha 8
+Open PowerShell and run this single command. It downloads the immutable Alpha 9
 installer and runs it outside the repository:
 
 ```powershell
-$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "275591f0bbb05ce164b96387c61b1d1a572cda9479e8ca7a60e399ca7cc74119") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
+$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "9597912ea5443ac8773d9959d3ad1acc0d32513d254c2a796875455f8e8d2798") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
 ```
 
 The installer creates one runtime at `%LOCALAPPDATA%\MOLT\runtime`, puts one
@@ -87,7 +87,7 @@ molt uninstall
 ### Reproducible source installation
 
 ```powershell
-git clone --branch v0.11.0-alpha.8 --depth 1 https://github.com/PraveenNimilka/MOLT.git
+git clone --branch v0.11.0-alpha.9 --depth 1 https://github.com/PraveenNimilka/MOLT.git
 Set-Location MOLT
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\molt.exe doctor
@@ -106,13 +106,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -EagerOnly
 
 `winget install MOLT` is a distribution target, not a currently published
 command; Microsoft must accept a versioned package manifest before it can be
-advertised. See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/INSTALL.md) for troubleshooting.
+advertised. See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/INSTALL.md) for troubleshooting.
 
 ## First training run
 
-Want one copy-and-run example? Follow the [complete beginner recipe](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/BEGINNER_QUICKSTART.md),
-then watch the [75-second measured workflow demonstration](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/demo/molt-launch-demo-75s.mp4)
-and inspect its [full sanitized log](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/demo/session.log).
+Want one copy-and-run example? Follow the [complete beginner recipe](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/BEGINNER_QUICKSTART.md),
+then watch the [75-second measured workflow demonstration](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/demo/molt-launch-demo-75s.mp4)
+and inspect its [full sanitized log](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/demo/session.log).
 
 For the simplest workflow, run:
 
@@ -231,7 +231,7 @@ for arbitrary third-party architectures.
 - Do not publish private paths, data, credentials, or model weights in bug reports.
 
 Report vulnerabilities through GitHub's private security-advisory workflow.
-See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/SECURITY.md).
+See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/SECURITY.md).
 
 ## CLI overview
 
@@ -263,16 +263,16 @@ releases.
 - The final controlled-clock, Soup, large-model endurance, and independent
   comparison gates are not complete.
 
-Read the [0.11.0a8 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/releases/0.11.0-alpha.8.md),
-[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/SUPPORT.md), and
-[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/docs/licensing.md). Dependency attribution and branding
-rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/THIRD_PARTY_NOTICES.md) and
-[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/TRADEMARKS.md).
+Read the [0.11.0a9 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/releases/0.11.0-alpha.9.md),
+[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/SUPPORT.md), and
+[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/licensing.md). Dependency attribution and branding
+rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/THIRD_PARTY_NOTICES.md) and
+[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/TRADEMARKS.md).
 
 ## License
 
 Current MOLT source is available under the
-[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.8/LICENSE). It is source-available, not OSI open
+[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/LICENSE). It is source-available, not OSI open
 source, and restricts use to provide a product that competes with the licensor.
 Models, datasets, and dependencies retain their own licenses. Public Python
 packages can be inspected; the license is a legal boundary, not technical copy

@@ -1,6 +1,6 @@
 # Complete beginner quickstart
 
-This is one exact Windows PowerShell recipe for MOLT `0.11.0a8`. It uses the
+This is one exact Windows PowerShell recipe for MOLT `0.11.0a9`. It uses the
 Apache-2.0 `Qwen/Qwen2.5-0.5B-Instruct` model at immutable revision
 `7ae557604adf67be50417f59c2c2f167def9a775` and MOLT's 30-record demonstration
 dataset. The dataset is intentionally tiny: this proves the complete local
@@ -17,12 +17,12 @@ workflow, not useful general model quality.
 Open PowerShell in an empty working directory and run:
 
 ```powershell
-$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "275591f0bbb05ce164b96387c61b1d1a572cda9479e8ca7a60e399ca7cc74119") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
+$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "9597912ea5443ac8773d9959d3ad1acc0d32513d254c2a796875455f8e8d2798") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
 molt --version
 molt doctor
 ```
 
-Expected: `molt 0.11.0a8`; `doctor` must report `cuda_available: true`, the
+Expected: `molt 0.11.0a9`; `doctor` must report `cuda_available: true`, the
 NVIDIA GPU name, and `torch: 2.8.0+cu128`. Stop if CUDA is unavailable.
 
 ## 2. Download the exact model and sample files
@@ -31,7 +31,7 @@ NVIDIA GPU name, and `torch: 2.8.0+cu128`. Stop if CUDA is unavailable.
 $moltPython="$env:LOCALAPPDATA\MOLT\runtime\Scripts\python.exe"
 & $moltPython -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-0.5B-Instruct', revision='7ae557604adf67be50417f59c2c2f167def9a775', local_dir='model', allow_patterns=['*.json','*.safetensors','merges.txt','vocab.json','LICENSE','README.md'])"
 New-Item -ItemType Directory -Force quickstart | Out-Null
-$base = 'https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/examples/beginner'
+$base = 'https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/examples/beginner'
 Invoke-WebRequest "$base/molt-demo.jsonl" -OutFile quickstart/molt-demo.jsonl
 Invoke-WebRequest "$base/configure.py" -OutFile quickstart/configure.py
 Invoke-WebRequest "$base/reload_adapter.py" -OutFile quickstart/reload_adapter.py

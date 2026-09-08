@@ -5,7 +5,7 @@
 Open PowerShell and run one command:
 
 ```powershell
-$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "275591f0bbb05ce164b96387c61b1d1a572cda9479e8ca7a60e399ca7cc74119") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
+$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "9597912ea5443ac8773d9959d3ad1acc0d32513d254c2a796875455f8e8d2798") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
 ```
 
 No repository checkout, pre-existing Python installation, administrator terminal,
@@ -63,7 +63,7 @@ Developers who need the exact lock file can still create a checkout-local
 environment:
 
 ```powershell
-git clone --branch v0.11.0-alpha.8 --depth 1 https://github.com/PraveenNimilka/MOLT.git
+git clone --branch v0.11.0-alpha.9 --depth 1 https://github.com/PraveenNimilka/MOLT.git
 Set-Location MOLT
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\molt.exe doctor
@@ -99,7 +99,7 @@ two-update fit test before the full run.
 
 `winget install MOLT` is not yet a live command. It requires a separately
 versioned distributable and acceptance into Microsoft's WinGet package index.
-The managed installer is the supported beginner path for Alpha 8.
+The managed installer is the supported beginner path for Alpha 9.
 
 ## Upstream sources
 

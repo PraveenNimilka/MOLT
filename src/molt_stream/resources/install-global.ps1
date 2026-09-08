@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$releaseVersion = '0.11.0a8'
+$releaseVersion = '0.11.0a9'
 $runtimeHome = if ($env:MOLT_HOME) {
     [IO.Path]::GetFullPath($env:MOLT_HOME)
 } else {
@@ -121,9 +121,19 @@ if ($Action -eq 'Uninstall') {
     $quotedHome = $runtimeHome.Replace("'", "''")
     $quotedCleanup = $cleanup.Replace("'", "''")
     [IO.File]::WriteAllText($cleanup, @"
-Start-Sleep -Seconds 2
-if (Test-Path -LiteralPath '$quotedHome') { Remove-Item -LiteralPath '$quotedHome' -Recurse -Force }
-Remove-Item -LiteralPath '$quotedCleanup' -Force
+for (`$attempt = 0; `$attempt -lt 60; `$attempt++) {
+    try {
+        if (Test-Path -LiteralPath '$quotedHome') {
+            Remove-Item -LiteralPath '$quotedHome' -Recurse -Force -ErrorAction Stop
+        }
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+if (-not (Test-Path -LiteralPath '$quotedHome')) {
+    Remove-Item -LiteralPath '$quotedCleanup' -Force
+}
 "@, [Text.UTF8Encoding]::new($false))
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $cleanup
@@ -153,12 +163,52 @@ $package = if ($PackageSource) {
     "moltengine$extras==$targetVersion"
 }
 $installArgs = @('pip', 'install', '--python', $runtimePython, '--cache-dir', $cache)
+$heldExecutable = $null
 if ($Action -in @('Repair', 'Update')) {
     $installArgs += @('--reinstall-package', 'moltengine')
+    $runtimeMolt = Join-Path $runtime 'Scripts\molt.exe'
+    if (Test-Path -LiteralPath $runtimeMolt) {
+        # Windows locks a running console-script executable. Renaming is atomic
+        # and lets uv create the replacement while the old process finishes.
+        $heldExecutable = Join-Path $runtime 'Scripts\molt.previous.exe'
+        if (Test-Path -LiteralPath $heldExecutable) {
+            Remove-Item -LiteralPath $heldExecutable -Force
+        }
+        Move-Item -LiteralPath $runtimeMolt -Destination $heldExecutable
+    }
 }
 $installArgs += @('--prerelease', 'allow', $package)
 & $uv @installArgs
-if ($LASTEXITCODE -ne 0) { throw 'MOLT package installation failed.' }
+if ($LASTEXITCODE -ne 0) {
+    $runtimeMolt = Join-Path $runtime 'Scripts\molt.exe'
+    if ($heldExecutable -and -not (Test-Path -LiteralPath $runtimeMolt)) {
+        Move-Item -LiteralPath $heldExecutable -Destination $runtimeMolt
+    }
+    throw 'MOLT package installation failed.'
+}
+if ($heldExecutable) {
+    $cleanup = Join-Path $env:TEMP ("molt-update-cleanup-{0}.ps1" -f [guid]::NewGuid())
+    $quotedExecutable = $heldExecutable.Replace("'", "''")
+    $quotedCleanup = $cleanup.Replace("'", "''")
+    [IO.File]::WriteAllText($cleanup, @"
+for (`$attempt = 0; `$attempt -lt 60; `$attempt++) {
+    try {
+        if (Test-Path -LiteralPath '$quotedExecutable') {
+            Remove-Item -LiteralPath '$quotedExecutable' -Force -ErrorAction Stop
+        }
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+if (-not (Test-Path -LiteralPath '$quotedExecutable')) {
+    Remove-Item -LiteralPath '$quotedCleanup' -Force
+}
+"@, [Text.UTF8Encoding]::new($false))
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $cleanup
+    ) | Out-Null
+}
 
 & $uv pip check --python $runtimePython
 if ($LASTEXITCODE -ne 0) { throw 'Dependency verification failed.' }
