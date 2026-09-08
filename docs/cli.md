@@ -4,12 +4,11 @@ MOLT provides both a **guided interactive menu** and **direct command-line flags
 
 ## Current alpha customer workflow
 
-Install the package and complete all optional runtime setup without manually
-assembling individual dependencies:
+Install and verify one shared per-user runtime without manually assembling
+Python environments or dependencies:
 
 ```powershell
-python -m pip install moltengine
-molt setup
+$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.8/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "275591f0bbb05ce164b96387c61b1d1a572cda9479e8ca7a60e399ca7cc74119") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
 molt
 ```
 
@@ -19,8 +18,8 @@ runs a short fit check, and applies stable-start cooling before the full run.
 Ctrl+C is handled at a completed optimizer-update boundary: choose whether to
 stop, then whether to save a verified checkpoint for later resume.
 
-Use the checkout's `.venv\Scripts\molt.exe` if `molt doctor` shows an unexpected
-global Python installation. `doctor` is the primary combined diagnostic view.
+Use `molt update`, `molt repair`, and `molt uninstall` to manage the shared
+runtime. `doctor` is the primary combined diagnostic view.
 
 ### Safe GPU endurance profile
 

@@ -340,6 +340,15 @@ def build_parser() -> argparse.ArgumentParser:
     setup = commands.add_parser("setup", help="Install and verify the complete NVIDIA training runtime")
     setup.add_argument("-y", "--yes", action="store_true", help="Install without confirmation")
     setup.add_argument("--dry-run", action="store_true", help="Show what would be installed")
+    for name, help_text in (
+        ("update", "Update the managed per-user MOLT runtime"),
+        ("repair", "Reinstall and verify the managed per-user MOLT runtime"),
+        ("uninstall", "Remove the managed MOLT runtime, launcher, and package cache"),
+    ):
+        management = commands.add_parser(name, help=help_text)
+        management.add_argument("--dry-run", action="store_true", help="Show the planned action")
+        if name == "uninstall":
+            management.add_argument("-y", "--yes", action="store_true", help="Remove without confirmation")
     commands.add_parser("runs", help="List saved runs and verified checkpoint status")
     fit = commands.add_parser("fit-test", help="Run two optimizer steps at configured geometry; not a sustained benchmark")
     fit.add_argument("--config", required=True)
@@ -521,7 +530,13 @@ def handle_doctor(ui: TerminalUI, output_func: Any) -> int:
     output_func(value, title="MOLT Doctor", rows=[
         ("Version", value["version"]), ("Commit", value["git_commit"] or "Installed package"),
         ("Python executable", value["python_executable"]), ("Package", value["package_path"]),
-        ("Environment", "Virtual environment" if value["virtual_environment"] else "Global Python — check launcher"),
+        ("Environment", (
+            "Managed per-user runtime"
+            if value.get("managed_runtime")
+            else "Virtual environment"
+            if value["virtual_environment"]
+            else "Global Python — run managed installer"
+        )),
         ("GPU", value.get("gpu", "CUDA unavailable")),
         ("VRAM", _bytes(value.get("gpu_vram_bytes"))),
         ("System RAM", _bytes(value["system_ram_bytes"])),
@@ -636,6 +651,41 @@ def handle_setup(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> 
         ui.card("Next step", [("Command", "molt")])
     else:
         output_func({"status": "complete", "next": "molt"}, title="MOLT Setup")
+    return 0
+
+
+def handle_runtime_management(
+    args: argparse.Namespace, ui: TerminalUI, output_func: Any
+) -> int:
+    """Update, repair, or uninstall the single managed Windows runtime."""
+
+    from molt_stream.runtime_manager import run_action, runtime_home
+
+    action = str(args.command)
+    if action == "uninstall" and not args.dry_run and not getattr(args, "yes", False):
+        if not sys.stdin.isatty():
+            raise MoltError("Non-interactive uninstall requires --yes")
+        if not ui.confirm(
+            f"Remove MOLT and its cached packages from {runtime_home()}?",
+            default=False,
+        ):
+            ui.check("MOLT was not removed")
+            return 0
+    result = run_action(action, plan=bool(args.dry_run))
+    if result:
+        raise MoltError(f"MOLT {action} failed with exit code {result}")
+    if args.dry_run:
+        return 0
+    if action == "uninstall":
+        output_func(
+            {"status": "scheduled", "runtime": str(runtime_home())},
+            title="MOLT Uninstall",
+        )
+    else:
+        output_func(
+            {"status": "verified", "action": action, "runtime": str(runtime_home())},
+            title=f"MOLT {action.title()}",
+        )
     return 0
 
 
@@ -1222,6 +1272,8 @@ def main(argv: list[str] | None = None) -> int:
             return handle_doctor(ui, output)
         elif args.command == "setup":
             return handle_setup(args, ui, output)
+        elif args.command in {"update", "repair", "uninstall"}:
+            return handle_runtime_management(args, ui, output)
         elif args.command == "runs":
             output(find_runs(), title="Saved runs")
         elif args.command == "export":

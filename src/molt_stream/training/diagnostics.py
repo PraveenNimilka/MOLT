@@ -7,12 +7,19 @@ from molt_stream import __version__
 
 
 def doctor() -> dict[str, object]:
+    from molt_stream.runtime_manager import runtime_home
     from molt_stream.training.stream_benchmark import inspect_capabilities
+
     result = inspect_capabilities()
     source = Path(__file__).resolve()
+    try:
+        managed_runtime = Path(sys.prefix).resolve() == (runtime_home() / "runtime").resolve()
+    except RuntimeError:
+        managed_runtime = False
     result.update(version=__version__, python_executable=sys.executable,
                   package_path=str(source.parents[1]), environment_prefix=sys.prefix,
                   virtual_environment=sys.prefix != sys.base_prefix,
+                  managed_runtime=managed_runtime,
                   checks_scope="Dependency detection, not model-fit or runtime verification")
     root = source.parents[3]
     result["git_commit"] = None
@@ -25,5 +32,7 @@ def doctor() -> dict[str, object]:
             pass
     result["next_step"] = "molt config --init; then prepare data and validate your training config"
     if sys.prefix == sys.base_prefix:
-        result["environment_warning"] = "Global Python installation; use your checkout's .venv/Scripts/molt.exe"
+        result["environment_warning"] = (
+            "Global Python installation; install or repair the managed per-user runtime"
+        )
     return result

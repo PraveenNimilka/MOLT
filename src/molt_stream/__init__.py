@@ -1,3 +1,3 @@
 """MOLT local AI training research infrastructure."""
 
-__version__ = "0.11.0a7"
+__version__ = "0.11.0a8"
