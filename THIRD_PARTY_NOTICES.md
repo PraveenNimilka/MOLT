@@ -10,6 +10,7 @@ installers resolve them as separate distributions governed by their own terms.
 | --- | --- | --- | --- |
 | NumPy | `>=2.1,<3` | BSD-3-Clause and bundled component licenses | [numpy/numpy](https://github.com/numpy/numpy) |
 | nvidia-ml-py | `>=13.580.65,<14` | BSD | [PyPI project](https://pypi.org/project/nvidia-ml-py/) |
+| Packaging | `>=24,<27` | Apache-2.0 or BSD-2-Clause | [pypa/packaging](https://github.com/pypa/packaging) |
 | psutil | `>=7,<8` | BSD-3-Clause | [giampaolo/psutil](https://github.com/giampaolo/psutil) |
 | PyTorch | `>=2.8,<2.9` | BSD-3-Clause; upstream distribution includes a NOTICE | [pytorch/pytorch](https://github.com/pytorch/pytorch) |
 
@@ -23,6 +24,7 @@ installers resolve them as separate distributions governed by their own terms.
 | `qlora` | Transformers | `>=5,<6` | Apache-2.0 | [huggingface/transformers](https://github.com/huggingface/transformers) |
 | `data` | PyArrow | `>=19,<24` | Apache-2.0; upstream distribution includes a NOTICE | [apache/arrow](https://github.com/apache/arrow) |
 | `windows-fusion` | triton-windows | `>=3.4,<3.5` | MIT | [woct0rdho/triton-windows](https://github.com/woct0rdho/triton-windows) |
+| `windows-monitoring` | WMI | `==1.5.1` | MIT | [tjguk/wmi](https://github.com/tjguk/wmi) |
 
 Development and build tools are not runtime components of the MOLT wheel.
 Transitive dependencies are installed separately and retain their own notices.

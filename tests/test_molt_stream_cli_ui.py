@@ -1,7 +1,7 @@
 import pytest
 
 from molt_stream import __version__
-from molt_stream.cli import TerminalUI, build_parser
+from molt_stream.cli import TerminalUI, _interactive_interrupt_decision, build_parser
 from molt_stream.core.contracts import ProgressEvent
 
 
@@ -30,6 +30,7 @@ def test_progress_has_slim_bar_and_live_metrics(capsys):
         "step", step=5, total_steps=10, elapsed_seconds=2.0,
         tokens_per_second=155_000.0, loss=2.5,
         vram_bytes=2_000_000_000, gpu_temperature_c=59.0,
+        cpu_temperature_c=61.5,
         thermal_state="full-speed", thermal_pause_seconds=0.0,
     ))
     ui.finish_progress()
@@ -39,6 +40,7 @@ def test_progress_has_slim_bar_and_live_metrics(capsys):
     assert "155,000 tok/s" in output
     assert "loss 2.5000" in output
     assert "GPU 59.0°C" in output
+    assert "CPU 61.5°C" in output
     assert "[Normal]" in output
 
 
@@ -80,3 +82,25 @@ def test_progress_uses_session_steps_for_resume_eta(capsys):
     output = capsys.readouterr().out
     assert "16:38" in output  # Realistic ~16m ETA, NOT 00:01!
 
+
+def test_selection_has_numbered_non_tty_fallback(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "2")
+    selected = TerminalUI(enabled=True, color=False).select(
+        "Choose", [("First", "one"), ("Second", "two")]
+    )
+    assert selected == 1
+    assert "1. First" in capsys.readouterr().out
+
+
+def test_interrupt_menu_can_continue_without_checkpoint_question(monkeypatch):
+    ui = TerminalUI(enabled=True, color=False)
+    answers = iter([False])
+    monkeypatch.setattr(ui, "confirm", lambda *_args, **_kwargs: next(answers))
+    assert _interactive_interrupt_decision(ui) == (False, True)
+
+
+def test_interrupt_menu_can_stop_without_saving(monkeypatch):
+    ui = TerminalUI(enabled=True, color=False)
+    answers = iter([True, False])
+    monkeypatch.setattr(ui, "confirm", lambda *_args, **_kwargs: next(answers))
+    assert _interactive_interrupt_decision(ui) == (True, False)

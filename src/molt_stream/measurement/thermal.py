@@ -19,6 +19,90 @@ class MicrobatchThermalDecision:
     stop_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class SystemStartupThermalDecision:
+    pause_seconds: float
+    gpu_temperature_c: float | None
+    cpu_temperature_c: float | None
+    cpu_sensor_available: bool
+    stop_reason: str | None = None
+
+
+def wait_for_stable_system_headroom(
+    read: Callable[[], TelemetryPoint | None],
+    *,
+    maximum_gpu_c: float | None,
+    maximum_cpu_c: float | None,
+    dwell_seconds: float,
+    maximum_wait_seconds: float = 300.0,
+    maximum_sample_age_seconds: float = 1.0,
+    notify: Callable[[float, float | None, float | None], None] | None = None,
+) -> SystemStartupThermalDecision:
+    """Wait passively for a stable GPU/CPU starting temperature.
+
+    GPU telemetry remains fail-closed when a GPU limit is requested. CPU
+    telemetry is best-effort because Windows has no universal CPU sensor API;
+    an unavailable CPU sensor is explicitly reported and never fabricated.
+    """
+    if maximum_gpu_c is None and maximum_cpu_c is None:
+        raise ValueError("at least one startup thermal limit is required")
+    limits = [value for value in (maximum_gpu_c, maximum_cpu_c) if value is not None]
+    if not all(math.isfinite(value) and 0 < value < 125 for value in limits):
+        raise ValueError("startup thermal limits must be positive finite temperatures")
+    if not (
+        math.isfinite(dwell_seconds)
+        and dwell_seconds > 0
+        and math.isfinite(maximum_wait_seconds)
+        and maximum_wait_seconds >= dwell_seconds
+        and maximum_sample_age_seconds > 0
+    ):
+        raise ValueError("Invalid stable system headroom settings")
+
+    started = time.perf_counter()
+    stable_since: float | None = None
+    saw_cpu_sensor = False
+    last_gpu = last_cpu = None
+    while True:
+        sample = read()
+        now = time.perf_counter()
+        if sample is None or not 0 <= now - sample.monotonic_seconds <= maximum_sample_age_seconds:
+            return SystemStartupThermalDecision(
+                now - started, last_gpu, last_cpu, saw_cpu_sensor,
+                "thermal telemetry missing or stale",
+            )
+        last_gpu = sample.gpu_temperature_c
+        last_cpu = sample.cpu_temperature_c
+        gpu_valid = last_gpu is not None and math.isfinite(last_gpu)
+        cpu_valid = last_cpu is not None and math.isfinite(last_cpu)
+        saw_cpu_sensor = saw_cpu_sensor or cpu_valid
+        if maximum_gpu_c is not None and not gpu_valid:
+            return SystemStartupThermalDecision(
+                now - started, last_gpu, last_cpu, saw_cpu_sensor,
+                "GPU thermal telemetry missing or stale",
+            )
+        gpu_cool = maximum_gpu_c is None or (gpu_valid and last_gpu <= maximum_gpu_c)
+        # CPU is enforced whenever its sensor exists. An absent sensor cannot
+        # safely be interpreted as either hot or cool, so it is disclosed and
+        # the GPU gate continues independently.
+        cpu_cool = maximum_cpu_c is None or not cpu_valid or last_cpu <= maximum_cpu_c
+        if gpu_cool and cpu_cool:
+            stable_since = now if stable_since is None else stable_since
+            if now - stable_since >= dwell_seconds:
+                return SystemStartupThermalDecision(
+                    now - started, last_gpu, last_cpu, saw_cpu_sensor
+                )
+        else:
+            stable_since = None
+        if now - started >= maximum_wait_seconds:
+            return SystemStartupThermalDecision(
+                now - started, last_gpu, last_cpu, saw_cpu_sensor,
+                "stable startup cooling timeout",
+            )
+        if notify is not None:
+            notify(now - started, last_gpu, last_cpu)
+        time.sleep(min(0.25, maximum_wait_seconds - (now - started)))
+
+
 def postrun_thermal_violation(
     peak_temperature_c: float | None, *, abort_c: float
 ) -> bool:
@@ -185,6 +269,17 @@ def cooling_pause(
 def latest_temperature_c(points: Sequence[TelemetryPoint]) -> float | None:
     return next(
         (float(point.gpu_temperature_c) for point in reversed(points) if point.gpu_temperature_c is not None),
+        None,
+    )
+
+
+def latest_cpu_temperature_c(points: Sequence[TelemetryPoint]) -> float | None:
+    return next(
+        (
+            float(point.cpu_temperature_c)
+            for point in reversed(points)
+            if point.cpu_temperature_c is not None
+        ),
         None,
     )
 

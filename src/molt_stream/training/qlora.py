@@ -37,10 +37,11 @@ from molt_stream.measurement.thermal import (
     cooling_pause,
     duty_cycle_pause_seconds,
     latest_telemetry_point,
+    latest_cpu_temperature_c,
     latest_temperature_c,
     passive_cooldown,
     postrun_thermal_violation,
-    wait_for_stable_thermal_headroom,
+    wait_for_stable_system_headroom,
     wait_for_thermal_headroom,
 )
 from molt_stream.training.update_transaction import UpdateTransaction
@@ -469,6 +470,7 @@ def train_qlora(
     *,
     resume: str | Path | None = None,
     progress: Callable[[ProgressEvent], None] | None = None,
+    interrupt_decision: Callable[[], tuple[bool, bool]] | None = None,
 ) -> Path:
     """Optional standard NF4 QLoRA engine.
 
@@ -522,20 +524,22 @@ def train_qlora(
         )
     started = time.perf_counter()
     startup_cooling_seconds = 0.0
-    if spec.thermal_startup_max_c is not None:
-        startup = wait_for_stable_thermal_headroom(
+    if spec.thermal_startup_max_c is not None or spec.thermal_cpu_startup_max_c is not None:
+        startup = wait_for_stable_system_headroom(
             telemetry.thermal_point,
-            maximum_c=spec.thermal_startup_max_c,
+            maximum_gpu_c=spec.thermal_startup_max_c,
+            maximum_cpu_c=spec.thermal_cpu_startup_max_c,
             dwell_seconds=spec.thermal_startup_dwell_seconds,
             maximum_wait_seconds=spec.thermal_startup_timeout_seconds,
             notify=(
-                lambda paused, current: progress(
+                lambda paused, gpu_current, cpu_current: progress(
                     ProgressEvent(
                         "step",
                         step=0,
                         total_steps=spec.max_steps,
                         elapsed_seconds=paused,
-                        gpu_temperature_c=current,
+                        gpu_temperature_c=gpu_current,
+                        cpu_temperature_c=cpu_current,
                         thermal_pause_seconds=paused,
                         thermal_state="startup-cooling",
                     )
@@ -548,6 +552,11 @@ def train_qlora(
         if startup.stop_reason is not None:
             telemetry.stop()
             raise CapabilityError(startup.stop_reason)
+        if progress and spec.thermal_cpu_startup_max_c is not None and not startup.cpu_sensor_available:
+            progress(ProgressEvent(
+                "startup",
+                "CPU temperature sensor unavailable; GPU startup cooling passed",
+            ))
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     try:
@@ -735,6 +744,19 @@ def train_qlora(
 
     interrupt = _InterruptLatch()
     interrupt.install()
+    stop_requested = False
+    save_interrupted_checkpoint = True
+
+    def process_interrupt() -> bool:
+        nonlocal stop_requested, save_interrupted_checkpoint
+        if not interrupt.requested:
+            return False
+        interrupt.requested = False
+        stop, save = interrupt_decision() if interrupt_decision else (True, True)
+        if stop:
+            stop_requested = True
+            save_interrupted_checkpoint = save
+        return stop_requested
     validation_started = time.perf_counter()
     initial = validation_nll()
     while initial is None and recover_thermal():
@@ -765,7 +787,9 @@ def train_qlora(
     static_microbatch = None
     static_graph_construction_seconds = 0.0
     peak_after_graph_capture: int | None = None
-    while step < spec.max_steps and not thermal_abort and not interrupt.requested:
+    while step < spec.max_steps and not thermal_abort and not stop_requested:
+        if process_interrupt():
+            break
         if (spec.qlora_train_last_layers is not None
                 and step >= spec.qlora_full_warmup_steps and not upper_layers_activated):
             from molt_stream.training.truncated_backprop import activate_upper_layer_training
@@ -922,7 +946,8 @@ def train_qlora(
             if progress:
                 progress(ProgressEvent("thermal_abort", message=thermal_stop_reason,
                     step=step, total_steps=spec.max_steps, initial_step=initial_step,
-                    thermal_state="thermal-abort", gpu_temperature_c=latest_temperature_c(telemetry.points)))
+                    thermal_state="thermal-abort", gpu_temperature_c=latest_temperature_c(telemetry.points),
+                    cpu_temperature_c=latest_cpu_temperature_c(telemetry.points)))
             break
         optimizer.step()
         if spec.qlora_bf16_adapter_shadows:
@@ -968,6 +993,7 @@ def train_qlora(
                     step=step,
                     total_steps=spec.max_steps,
                     gpu_temperature_c=temperature,
+                    cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                     thermal_state="thermal-abort",
                     initial_step=initial_step,
                 ))
@@ -984,6 +1010,7 @@ def train_qlora(
                         tokens_per_second=(tokens - initial_tokens) / max(1e-6, time.perf_counter() - training_started),
                         loss=loss_sum,
                         gpu_temperature_c=current,
+                        cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                         vram_bytes=int(torch.cuda.memory_allocated()),
                         thermal_pause_seconds=remaining,
                         thermal_state="pit-stop-cooldown",
@@ -1007,6 +1034,7 @@ def train_qlora(
                         step=step,
                         total_steps=spec.max_steps,
                         gpu_temperature_c=temperature,
+                        cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                         thermal_state="thermal-abort",
                         initial_step=initial_step,
                     ))
@@ -1022,6 +1050,7 @@ def train_qlora(
                 loss=loss_sum,
                 vram_bytes=torch.cuda.memory_allocated(),
                 gpu_temperature_c=temperature,
+                cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                 thermal_state=thermal_state,
                 thermal_pause_seconds=pause,
                 initial_step=initial_step,
@@ -1037,15 +1066,20 @@ def train_qlora(
                 break
             evaluations.append(evaluation_record(nll))
         step_intervals.append(time.perf_counter() - step_started)
+        if process_interrupt():
+            break
     training_loop_seconds = time.perf_counter() - training_started
     interrupt.restore()
-    interrupted = interrupt.requested and not thermal_abort and step < spec.max_steps
+    interrupted = stop_requested and not thermal_abort and step < spec.max_steps
     termination_reason = (
         "thermal_abort" if thermal_abort else "interrupted" if interrupted else "completed"
     )
-    state = committed_state(termination_reason)
     checkpoint_started = time.perf_counter()
-    checkpoint_path = store.save(state)
+    checkpoint_path = (
+        store.save(committed_state(termination_reason))
+        if not interrupted or save_interrupted_checkpoint
+        else None
+    )
     checkpoint_seconds = time.perf_counter() - checkpoint_started
     measured = telemetry.stop()
     if microbatch_peak_temperature is not None:
@@ -1201,8 +1235,8 @@ def train_qlora(
             "qlora_full_warmup_steps": spec.qlora_full_warmup_steps,
             "qlora_validation_batches": spec.qlora_validation_batches,
             "lora_target_modules": spec.stream.lora_target_modules,
-            "checkpoint": str(checkpoint_path),
-            "checkpoint_bytes": checkpoint_path.stat().st_size,
+            "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
+            "checkpoint_bytes": checkpoint_path.stat().st_size if checkpoint_path is not None else None,
             "cuda_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
             "cuda_peak_reserved_bytes": torch.cuda.max_memory_reserved(),
             "cuda_memory_pools": cuda_memory_pools,

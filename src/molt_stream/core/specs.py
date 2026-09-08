@@ -155,6 +155,7 @@ class TrainingSpec:
     thermal_max_pause_seconds: float = 0.25
     thermal_initial_pause_seconds: float = 0.0
     thermal_startup_max_c: float | None = None
+    thermal_cpu_startup_max_c: float | None = None
     thermal_startup_dwell_seconds: float = 0.0
     thermal_startup_timeout_seconds: float = 300.0
     thermal_stability_band_c: float = 1.5
@@ -410,21 +411,29 @@ class TrainingSpec:
             raise ValueError("thermal_lookahead_seconds must be positive")
         if not 0 <= self.thermal_initial_pause_seconds <= self.thermal_max_pause_seconds:
             raise ValueError("thermal_initial_pause_seconds must be between zero and the maximum pause")
-        if self.thermal_startup_max_c is None:
+        if self.thermal_startup_max_c is None and self.thermal_cpu_startup_max_c is None:
             if self.thermal_startup_dwell_seconds != 0:
                 raise ValueError(
-                    "thermal_startup_dwell_seconds requires thermal_startup_max_c"
+                    "thermal_startup_dwell_seconds requires thermal_startup_max_c "
+                    "or thermal_cpu_startup_max_c"
                 )
         elif not (
-            0 < self.thermal_startup_max_c <= self.thermal_target_c
-            and self.thermal_startup_dwell_seconds > 0
+            self.thermal_startup_dwell_seconds > 0
             and self.thermal_startup_timeout_seconds
             >= self.thermal_startup_dwell_seconds
         ):
             raise ValueError(
-                "startup thermal settings require 0 < max <= target and "
+                "startup thermal settings require "
                 "0 < dwell <= timeout"
             )
+        if self.thermal_startup_max_c is not None and not (
+            0 < self.thermal_startup_max_c <= self.thermal_target_c
+        ):
+            raise ValueError("thermal_startup_max_c must be positive and <= thermal_target_c")
+        if self.thermal_cpu_startup_max_c is not None and not (
+            0 < self.thermal_cpu_startup_max_c < 125
+        ):
+            raise ValueError("thermal_cpu_startup_max_c must be between 0 and 125")
         if self.thermal_max_pause_seconds <= 0:
             raise ValueError("thermal_max_pause_seconds must be positive")
         if not 0 < self.thermal_stability_band_c < (self.thermal_abort_c - self.thermal_target_c):
@@ -543,6 +552,11 @@ class TrainingSpec:
                 None
                 if value.get("thermal_startup_max_c") is None
                 else float(value["thermal_startup_max_c"])
+            ),
+            thermal_cpu_startup_max_c=(
+                None
+                if value.get("thermal_cpu_startup_max_c") is None
+                else float(value["thermal_cpu_startup_max_c"])
             ),
             thermal_startup_dwell_seconds=float(
                 value.get("thermal_startup_dwell_seconds", 0.0)

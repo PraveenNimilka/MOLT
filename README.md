@@ -2,18 +2,18 @@
 
 **Thermally aware, memory-efficient QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
-[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/LICENSE)
-[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/releases/0.11.0-alpha.4.md)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/LICENSE)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/pyproject.toml)
+[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/releases/0.11.0-alpha.5.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
-[![PyPI: v0.11.0a4](https://img.shields.io/badge/PyPI-v0.11.0a4-blue.svg)](https://pypi.org/project/moltengine/0.11.0a4/)
+[![PyPI: v0.11.0a5](https://img.shields.io/badge/PyPI-v0.11.0a5-blue.svg)](https://pypi.org/project/moltengine/0.11.0a5/)
 
 MOLT provides a Windows-first workflow to prepare data, validate workload fit,
 fine-tune supported local language models, safely resume interrupted runs, and
 export adapters. It includes hardware telemetry, thermal controls, verified
 checkpointing, and experimental optimized execution paths.
 
-**Latest release: 0.11.0a4 · Source-available research alpha.**
+**Latest release: 0.11.0a5 · Source-available research alpha.**
 Install the versioned release below; `main` may include unreleased changes.
 Validate workloads before production use.
 
@@ -28,9 +28,9 @@ produced the following means against the tested Unsloth configuration:
 | Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
 | Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
 
-![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.4/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
+![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.5/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
 
-See the [calculation method and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/benchmarks/README.md).
+See the [calculation method and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/benchmarks/README.md).
 
 Every recorded pair favored MOLT for elapsed time and energy. These results are
 diagnostic evidence, not a universal performance claim: graphics clocks were not
@@ -63,11 +63,12 @@ py -3.12 -m venv .venv
 python -m pip install --upgrade pip
 ```
 
-Install the supported CUDA build of PyTorch first, then MOLT:
+Install MOLT, then let its setup command install and verify the complete CUDA,
+QLoRA, data, and optimized-kernel runtime:
 
 ```powershell
-python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install "moltengine[qlora,data,windows-fusion]==0.11.0a4"
+python -m pip install moltengine==0.11.0a5
+molt setup
 ```
 
 Verify the installation:
@@ -80,7 +81,7 @@ molt doctor
 ### Option 2: Reproducible source installation
 
 ```powershell
-git clone --branch v0.11.0-alpha.4 --depth 1 https://github.com/PraveenNimilka/MOLT.git
+git clone --branch v0.11.0-alpha.5 --depth 1 https://github.com/PraveenNimilka/MOLT.git
 Set-Location MOLT
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\molt.exe doctor
@@ -97,9 +98,30 @@ To omit the optional optimized backend:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -EagerOnly
 ```
 
-See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/INSTALL.md) for troubleshooting.
+See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/INSTALL.md) for troubleshooting.
 
 ## First training run
+
+For the simplest workflow, run:
+
+```powershell
+molt
+```
+
+Use Up/Down and Enter, choose **Train**, select the local model directory and
+training data, then keep the recommended settings or customize the important
+ones. Raw `.txt`, `.jsonl`, and `.parquet` data is prepared automatically. MOLT
+runs a two-step fit check, waits for a stable starting temperature, and starts
+the full run only after the checks pass. During training, Ctrl+C opens a safe
+stop menu and offers a verified resumable checkpoint.
+
+CPU temperature is displayed when the operating system or a supported hardware
+monitor exposes a real CPU package sensor. On Windows systems without one, MOLT
+shows `CPU sensor unavailable`; it never substitutes an ACPI zone or invented
+value. GPU cooling and the GPU abort boundary remain active.
+
+The explicit commands below remain available for reproducible and automated
+workflows.
 
 ### 1. Check the machine
 
@@ -197,7 +219,7 @@ for arbitrary third-party architectures.
 - Do not publish private paths, data, credentials, or model weights in bug reports.
 
 Report vulnerabilities through GitHub's private security-advisory workflow.
-See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/SECURITY.md).
+See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/SECURITY.md).
 
 ## CLI overview
 
@@ -229,16 +251,16 @@ releases.
 - The final controlled-clock, Soup, large-model endurance, and independent
   comparison gates are not complete.
 
-Read the [0.11.0a4 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/releases/0.11.0-alpha.4.md),
-[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/SUPPORT.md), and
-[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/docs/licensing.md). Dependency attribution and branding
-rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/THIRD_PARTY_NOTICES.md) and
-[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/TRADEMARKS.md).
+Read the [0.11.0a5 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/releases/0.11.0-alpha.5.md),
+[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/SUPPORT.md), and
+[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/docs/licensing.md). Dependency attribution and branding
+rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/THIRD_PARTY_NOTICES.md) and
+[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/TRADEMARKS.md).
 
 ## License
 
 Current MOLT source is available under the
-[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.4/LICENSE). It is source-available, not OSI open
+[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.5/LICENSE). It is source-available, not OSI open
 source, and restricts use to provide a product that competes with the licensor.
 Models, datasets, and dependencies retain their own licenses. Public Python
 packages can be inspected; the license is a legal boundary, not technical copy

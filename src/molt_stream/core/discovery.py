@@ -35,6 +35,8 @@ def get_hardware_info() -> dict[str, Any]:
         "gpu_vram_free_gb": None,
         "gpu_power_limit_w": None,
         "gpu_temperature_c": None,
+        "cpu_temperature_c": None,
+        "cpu_temperature_source": None,
         "gpu_driver": None,
         "cuda_version": None,
         "pytorch_version": None,
@@ -49,6 +51,15 @@ def get_hardware_info() -> dict[str, Any]:
         info["total_ram_gb"] = round(vm.total / (1024**3), 2)
         info["available_ram_gb"] = round(vm.available / (1024**3), 2)
         info["cpu_cores_physical"] = psutil.cpu_count(logical=False)
+    except Exception:
+        pass
+
+    try:
+        from molt_stream.core.cpu_temperature import CpuTemperatureReader
+
+        cpu_temperature = CpuTemperatureReader(cache_seconds=0.1)
+        info["cpu_temperature_c"] = cpu_temperature.read()
+        info["cpu_temperature_source"] = cpu_temperature.source
     except Exception:
         pass
 

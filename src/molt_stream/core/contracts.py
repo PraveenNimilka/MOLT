@@ -19,6 +19,7 @@ class TelemetryPoint:
     gpu_graphics_clock_mhz: int | None = None
     gpu_memory_clock_mhz: int | None = None
     gpu_process_used_bytes: int | None = None
+    cpu_temperature_c: float | None = None
 
 
 class TelemetrySampler(Protocol):
@@ -43,3 +44,4 @@ class ProgressEvent:
     thermal_state: str = "full-speed"
     thermal_pause_seconds: float = 0.0
     initial_step: int = 0
+    cpu_temperature_c: float | None = None

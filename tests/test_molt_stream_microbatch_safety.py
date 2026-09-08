@@ -12,6 +12,7 @@ from molt_stream.measurement.thermal import (
     passive_cooldown,
     postrun_thermal_violation,
     wait_for_stable_thermal_headroom,
+    wait_for_stable_system_headroom,
     wait_for_thermal_headroom,
 )
 from molt_stream.training.update_transaction import UpdateTransaction
@@ -111,6 +112,56 @@ def test_stable_startup_gate_times_out_when_chassis_never_cools(monkeypatch):
         maximum_wait_seconds=0.5,
     )
     assert result.stop_reason == "stable startup cooling timeout"
+
+
+def test_system_startup_gate_waits_for_both_gpu_and_cpu(monkeypatch):
+    clock = [10.0]
+    temperatures = iter([(54.0, 75.0), (54.0, 69.0), (54.0, 69.0), (54.0, 69.0)])
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.perf_counter", lambda: clock[0]
+    )
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    def read():
+        gpu, cpu = next(temperatures)
+        return TelemetryPoint(
+            clock[0], 0, None, None, gpu, None, None, None,
+            cpu_temperature_c=cpu,
+        )
+
+    result = wait_for_stable_system_headroom(
+        read,
+        maximum_gpu_c=55.0,
+        maximum_cpu_c=70.0,
+        dwell_seconds=0.5,
+        maximum_wait_seconds=2.0,
+    )
+    assert result.stop_reason is None
+    assert result.cpu_sensor_available
+    assert result.pause_seconds == pytest.approx(0.75)
+
+
+def test_system_startup_gate_discloses_optional_cpu_sensor_absence(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.perf_counter", lambda: clock[0]
+    )
+    monkeypatch.setattr(
+        "molt_stream.measurement.thermal.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    result = wait_for_stable_system_headroom(
+        lambda: TelemetryPoint(clock[0], 0, None, None, 50.0, None, None, None),
+        maximum_gpu_c=55.0,
+        maximum_cpu_c=70.0,
+        dwell_seconds=0.5,
+        maximum_wait_seconds=1.0,
+    )
+    assert result.stop_reason is None
+    assert not result.cpu_sensor_available
 
 
 def test_partial_accumulation_rollback_checkpoint_resume_is_exact(tmp_path):

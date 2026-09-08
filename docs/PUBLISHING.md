@@ -45,5 +45,6 @@ uv build
 uvx twine check dist/*
 ```
 
-CUDA PyTorch uses its own package index. End users should install the supported
-CUDA PyTorch wheel first, then install MOLT from PyPI as documented in the README.
+The base package can be installed directly from PyPI. End users then run
+`molt setup`, which installs and validates the supported CUDA PyTorch, QLoRA,
+data, monitoring, and optimized-kernel runtime documented in the README.

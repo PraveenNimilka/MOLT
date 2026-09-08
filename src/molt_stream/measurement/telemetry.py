@@ -7,6 +7,7 @@ from dataclasses import asdict
 import psutil
 
 from molt_stream.core.contracts import TelemetryPoint
+from molt_stream.core.cpu_temperature import CpuTemperatureReader
 
 
 def _process_gpu_memory_bytes(nvml, handle, pid: int) -> int | None:
@@ -98,7 +99,13 @@ def integrate_board_energy(points: list[TelemetryPoint]) -> float | None:
 
 
 class NVMLTelemetry:
-    def __init__(self, interval_seconds: float = 0.1, *, enable_gpu: bool = True):
+    def __init__(
+        self,
+        interval_seconds: float = 0.1,
+        *,
+        enable_gpu: bool = True,
+        cpu_temperature_reader: CpuTemperatureReader | None = None,
+    ):
         if interval_seconds <= 0:
             raise ValueError("interval must be positive")
         self.interval_seconds = interval_seconds
@@ -108,6 +115,7 @@ class NVMLTelemetry:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._nvml = self._handle = None
+        self.cpu_temperature_reader = cpu_temperature_reader or CpuTemperatureReader()
 
     def start(self) -> None:
         if self._thread is not None:
@@ -135,12 +143,18 @@ class NVMLTelemetry:
 
         Do not inject partial samples into the board-energy integration stream.
         """
+        cpu_temperature = self.cpu_temperature_reader.read()
         if self._nvml is None or self._handle is None:
-            return None
+            return TelemetryPoint(
+                time.perf_counter(), 0, None, None, None, None, None, None,
+                cpu_temperature_c=cpu_temperature,
+            ) if cpu_temperature is not None else None
         try:
             temperature = float(self._nvml.nvmlDeviceGetTemperature(self._handle, 0))
-            return TelemetryPoint(time.perf_counter(), 0, None, None, temperature,
-                                  None, None, None)
+            return TelemetryPoint(
+                time.perf_counter(), 0, None, None, temperature, None, None, None,
+                cpu_temperature_c=cpu_temperature,
+            )
         except Exception as exc:
             message = f"NVML thermal guard failed: {type(exc).__name__}: {exc}"
             if message not in self.errors and len(self.errors) < 32:
@@ -182,7 +196,7 @@ class NVMLTelemetry:
                     time.perf_counter(), process.memory_info().rss, power, used, temp, util,
                     limit, reasons, psutil.cpu_percent(interval=None),
                     int(psutil.virtual_memory().available), graphics_clock, memory_clock,
-                    process_used,
+                    process_used, self.cpu_temperature_reader.read(),
                 )
             )
             self._stop.wait(self.interval_seconds)
@@ -199,6 +213,7 @@ class NVMLTelemetry:
         energy = integrate_board_energy(self.points)
         powers = [float(p.gpu_power_watts) for p in self.points if p.gpu_power_watts is not None]
         temps = [float(p.gpu_temperature_c) for p in self.points if p.gpu_temperature_c is not None]
+        cpu_temps = [float(p.cpu_temperature_c) for p in self.points if p.cpu_temperature_c is not None]
         used = [int(p.gpu_used_bytes) for p in self.points if p.gpu_used_bytes is not None]
         utilization = [float(p.gpu_utilization_percent) for p in self.points if p.gpu_utilization_percent is not None]
         reasons = [int(p.gpu_clock_event_reasons) for p in self.points if p.gpu_clock_event_reasons is not None]
@@ -231,6 +246,9 @@ class NVMLTelemetry:
             "minimum_enforced_power_limit_watts": min(limits) if limits else None,
             "maximum_enforced_power_limit_watts": max(limits) if limits else None,
             "peak_gpu_temperature_c": max(temps) if temps else None,
+            "mean_cpu_temperature_c": sum(cpu_temps) / len(cpu_temps) if cpu_temps else None,
+            "peak_cpu_temperature_c": max(cpu_temps) if cpu_temps else None,
+            "cpu_temperature_source": self.cpu_temperature_reader.source,
             "peak_gpu_used_bytes": max(used) if used else None,
             "peak_process_gpu_used_bytes": max(process_used) if process_used else None,
             "thermal_throttle_observed": any(reason & (0x20 | 0x40) for reason in reasons),

@@ -249,11 +249,12 @@ wheels = [
 
 [[package]]
 name = "moltengine"
-version = "0.11.0a4"
+version = "0.11.0a5"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
     { name = "nvidia-ml-py" },
+    { name = "packaging" },
     { name = "psutil" },
     { name = "torch" },
 ]
@@ -276,6 +277,9 @@ windows-fusion = [
     { name = "torch" },
     { name = "triton-windows", marker = "sys_platform == 'win32'" },
 ]
+windows-monitoring = [
+    { name = "wmi", marker = "sys_platform == 'win32'" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -289,6 +293,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "extra == 'qlora'", specifier = ">=0.48,<1" },
     { name = "numpy", specifier = ">=2.1,<3" },
     { name = "nvidia-ml-py", specifier = ">=13.580.65,<14" },
+    { name = "packaging", specifier = ">=24,<27" },
     { name = "peft", marker = "extra == 'qlora'", specifier = ">=0.17,<1" },
     { name = "psutil", specifier = ">=7,<8" },
     { name = "pyarrow", marker = "extra == 'data'", specifier = ">=19,<24" },
@@ -298,8 +303,9 @@ requires-dist = [
     { name = "torch", marker = "extra == 'windows-fusion'", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu128" },
     { name = "transformers", marker = "extra == 'qlora'", specifier = ">=5,<6" },
     { name = "triton-windows", marker = "sys_platform == 'win32' and extra == 'windows-fusion'", specifier = ">=3.4,<3.5" },
+    { name = "wmi", marker = "sys_platform == 'win32' and extra == 'windows-monitoring'", specifier = "==1.5.1" },
 ]
-provides-extras = ["dev", "windows-fusion", "qlora", "data"]
+provides-extras = ["dev", "windows-fusion", "qlora", "data", "windows-monitoring"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -575,6 +581,16 @@ wheels = [
 ]
 
 [[package]]
+name = "pywin32"
+version = "312"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/ff/32aa7d2ed0ab12b323aaa64f9b75e6ad4f8fd09f9ccfc28c79414d46838d/pywin32-312-cp312-cp312-win32.whl", hash = "sha256:dab4f65ac9c4e48400a2a0530c46c3c579cd5905ecd11b80692373915269208b", size = 6371877, upload-time = "2026-06-04T07:49:28.836Z" },
+    { url = "https://files.pythonhosted.org/packages/03/d9/77040d3b43df3f3be32ea289433d660d2727f5ba327bc73be835127d9d60/pywin32-312-cp312-cp312-win_amd64.whl", hash = "sha256:b457f6d628a47e8a7346ce22acb7e1a46a4a78b52e1d17e1af56871bd19a93bc", size = 6914841, upload-time = "2026-06-04T07:49:31.85Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/cc/7b1ec671775756020a0ee7f4feeaf3c568f0ab86bd3900088cf986937a92/pywin32-312-cp312-cp312-win_arm64.whl", hash = "sha256:6017c58e12f6809fbb0555b75df144c2922a9ffd18e4b9b5afa863b6c1a9d950", size = 6727901, upload-time = "2026-06-04T07:49:34.244Z" },
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -844,4 +860,16 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5", size = 113555, upload-time = "2026-07-02T08:40:05.92Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8", size = 45571, upload-time = "2026-07-02T08:40:04.659Z" },
+]
+
+[[package]]
+name = "wmi"
+version = "1.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d4/66/6364deb0a03415f96c66803d8c4379f808f2401da3bdb183348487b10510/WMI-1.5.1.tar.gz", hash = "sha256:b6a6be5711b1b6c8d55bda7a8befd75c48c12b770b9d227d31c1737dbf0d40a6", size = 26254, upload-time = "2020-04-28T08:22:58.096Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/b9/a80d1ed4d115dac8e2ac08d16af046a77ab58e3d186e22395bf2add24090/WMI-1.5.1-py2.py3-none-any.whl", hash = "sha256:1d6b085e5c445141c475476000b661f60fff1aaa19f76bf82b7abb92e0ff4942", size = 28912, upload-time = "2020-04-28T08:22:56.055Z" },
 ]

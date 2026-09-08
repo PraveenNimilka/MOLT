@@ -2,7 +2,22 @@
 
 MOLT provides both a **guided interactive menu** and **direct command-line flags** for advanced scripting.
 
-## 0.10.0 alpha customer workflow
+## Current alpha customer workflow
+
+Install the package and complete all optional runtime setup without manually
+assembling individual dependencies:
+
+```powershell
+python -m pip install moltengine
+molt setup
+molt
+```
+
+The interactive menus use Up/Down and Enter. Guided training asks for a model
+and dataset, offers recommended or custom important settings, prepares raw data,
+runs a short fit check, and applies stable-start cooling before the full run.
+Ctrl+C is handled at a completed optimizer-update boundary: choose whether to
+stop, then whether to save a verified checkpoint for later resume.
 
 Use the checkout's `.venv\Scripts\molt.exe` if `molt doctor` shows an unexpected
 global Python installation. `doctor` is the primary combined diagnostic view.
@@ -81,7 +96,8 @@ Simply type:
 molt
 ```
 
-MOLT inspects your hardware and displays an interactive landing menu:
+MOLT inspects your hardware and displays an interactive landing menu. Use the
+arrow keys and Enter (numbered input remains available for redirected terminals):
 ```text
 ╭─ [ MOLT AI INFRASTRUCTURE ] ───────────────────────────────────────╮
 │ Version       v0.9.2 (Alpha)                                       │

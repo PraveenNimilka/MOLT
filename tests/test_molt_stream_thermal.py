@@ -51,6 +51,7 @@ def test_training_spec_round_trips_thermal_and_power_fields(tmp_path):
         max_pause_ms=25.0,
         thermal_protective_pause_ms=100.0,
         thermal_startup_max_c=50.0,
+        thermal_cpu_startup_max_c=65.0,
         thermal_startup_dwell_seconds=10.0,
         thermal_startup_timeout_seconds=60.0,
     )
@@ -65,6 +66,7 @@ def test_training_spec_round_trips_thermal_and_power_fields(tmp_path):
     assert restored.min_pause_ms == 10.0
     assert restored.max_pause_ms == 25.0
     assert restored.thermal_startup_max_c == 50.0
+    assert restored.thermal_cpu_startup_max_c == 65.0
     assert restored.thermal_startup_dwell_seconds == 10.0
     assert restored.thermal_startup_timeout_seconds == 60.0
 

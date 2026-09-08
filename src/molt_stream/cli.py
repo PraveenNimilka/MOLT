@@ -9,6 +9,7 @@ Provides hardware-aware AI training with:
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -17,7 +18,7 @@ import subprocess
 import sys
 import time
 import warnings
-from dataclasses import replace, asdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -43,9 +44,8 @@ from molt_stream.core.discovery import (
     get_hardware_info,
     init_workspace,
 )
-from molt_stream.core.profiles import PROFILES, apply_profile, get_profile
+from molt_stream.core.profiles import PROFILES, apply_profile
 from molt_stream.core.system_tuning import prioritized_execution
-from molt_stream.core.integrity import sha256
 
 
 class TerminalUI:
@@ -137,7 +137,8 @@ class TerminalUI:
         if event.kind != "step" or event.total_steps <= 0:
             return
         fraction = min(1.0, event.step / event.total_steps)
-        width = 20
+        columns = shutil.get_terminal_size((140, 24)).columns if sys.stdout.isatty() else 140
+        width = 20 if columns >= 135 else 12 if columns >= 110 else 8
         filled = round(width * fraction)
         bar = self._style("█" * filled, self.GREEN) + self._style("░" * (width - filled), self.MUTED)
         session_steps = max(1, event.step - event.initial_step)
@@ -149,6 +150,11 @@ class TerminalUI:
         loss = f"loss {event.loss:.4f}" if event.loss is not None else "loss —"
         vram = f"VRAM {event.vram_bytes / 1e9:.2f} GB" if event.vram_bytes is not None else "VRAM —"
         temp = f"GPU {event.gpu_temperature_c:.1f}°C" if event.gpu_temperature_c is not None else "GPU —°C"
+        cpu_temp = (
+            f"CPU {event.cpu_temperature_c:.1f}°C"
+            if event.cpu_temperature_c is not None
+            else "CPU sensor —"
+        )
         pause_ms = round(event.thermal_pause_seconds * 1000)
         if event.thermal_state == "gear-1-sprint":
             cooling = "[Gear 1]"
@@ -162,10 +168,12 @@ class TerminalUI:
             cooling = f"[Pause: {pause_ms}ms]"
         else:
             cooling = "[Normal]"
-        line = (
-            f"{bar} {fraction * 100:5.1f}%  ETA {_duration(eta)}  {speed}  "
-            f"{loss}  {temp}  {cooling}  {vram}"
-        )
+        details = [speed, loss, temp, cpu_temp, cooling, vram]
+        if columns < 130:
+            details.remove(vram)
+        if columns < 110:
+            details.remove(loss)
+        line = f"{bar} {fraction * 100:5.1f}%  ETA {_duration(eta)}  " + "  ".join(details)
         sys.stdout.write("\r\x1b[2K" + line)
         sys.stdout.flush()
         self._progress_active = True
@@ -175,6 +183,83 @@ class TerminalUI:
             sys.stdout.write("\n")
             sys.stdout.flush()
             self._progress_active = False
+
+    def select(
+        self,
+        title: str,
+        options: list[tuple[str, str]],
+        *,
+        default: int = 0,
+        allow_cancel: bool = False,
+    ) -> int | None:
+        """Select an option with arrow keys on a terminal, numbers otherwise."""
+        if not options:
+            raise ValueError("selection requires at least one option")
+        selected = min(max(default, 0), len(options) - 1)
+        self.finish_progress()
+        print(self._style(title, self.BOLD + self.WHITE))
+        if sys.stdin.isatty() and sys.stdout.isatty() and os.name == "nt":
+            import msvcrt
+
+            def render(*, move_up: bool) -> None:
+                if move_up:
+                    sys.stdout.write(f"\x1b[{len(options)}A")
+                for index, (label, description) in enumerate(options):
+                    pointer = "❯" if index == selected else " "
+                    detail = f"  {description}" if description else ""
+                    foreground = self.GREEN if index == selected else self.WHITE
+                    sys.stdout.write(
+                        "\r\x1b[2K"
+                        + self._style(f" {pointer} {label}", foreground)
+                        + self._style(detail, self.MUTED)
+                        + "\n"
+                    )
+                sys.stdout.flush()
+
+            render(move_up=False)
+            while True:
+                key = msvcrt.getwch()
+                if key in ("\x00", "\xe0"):
+                    key = msvcrt.getwch()
+                    if key == "H":
+                        selected = (selected - 1) % len(options)
+                    elif key == "P":
+                        selected = (selected + 1) % len(options)
+                    else:
+                        continue
+                    render(move_up=True)
+                elif key in ("\r", "\n"):
+                    return selected
+                elif key == "\x1b" and allow_cancel:
+                    return None
+                elif key == "\x03":
+                    raise KeyboardInterrupt
+
+        for index, (label, description) in enumerate(options, start=1):
+            suffix = f" — {description}" if description else ""
+            print(f"  {index}. {label}{suffix}")
+        try:
+            raw = input(f"Select [{default + 1}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            if allow_cancel:
+                return None
+            return default
+        if not raw:
+            return default
+        lowered = raw.lower()
+        for index, (label, _description) in enumerate(options):
+            if lowered in {label.lower(), label[:1].lower()}:
+                return index
+        try:
+            value = int(raw) - 1
+        except ValueError:
+            return default
+        return value if 0 <= value < len(options) else default
+
+    def confirm(self, question: str, *, default: bool = True) -> bool:
+        options = [("Yes", ""), ("No", "")]
+        selected = self.select(question, options, default=0 if default else 1)
+        return selected == 0
 
 
 def _duration(seconds: float) -> str:
@@ -203,7 +288,6 @@ def _report_rows(summary: dict[str, Any], path: Path) -> list[tuple[str, object]
     evaluations = summary.get("evaluations", [])
     initial = evaluations[0] if evaluations else {}
     final = evaluations[-1] if evaluations else {}
-    initial_perplexity = initial.get("perplexity")
     final_perplexity = final.get("perplexity")
     telemetry = summary.get("telemetry", {})
     return [
@@ -223,20 +307,14 @@ def _resolve_execution_mode(requested: str | None, ui: TerminalUI) -> str:
         return requested
     if not ui.enabled or not sys.stdin.isatty():
         return "normal"
-    ui.card(
-        "Execution Mode",
+    choice = ui.select(
+        "Execution mode",
         [
-            ("1. Normal Mode", "Standard OS priority and background defaults (Recommended)"),
-            ("2. Prioritized Mode", "Temporary MOLT priority; other apps and Defender unchanged"),
+            ("Normal", "Recommended; leaves other applications unchanged"),
+            ("Prioritized", "Temporarily raises MOLT process priority"),
         ],
     )
-    try:
-        choice = input(ui._style("Select mode [1=Normal, 2=Prioritized] (default: 1): ", ui.GREEN)).strip()
-        if choice == "2":
-            return "prioritize"
-    except (EOFError, KeyboardInterrupt):
-        print()
-    return "normal"
+    return "prioritize" if choice == 1 else "normal"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -259,6 +337,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=False)
 
     commands.add_parser("doctor", help="Show installation identity, environment, and optional capabilities")
+    setup = commands.add_parser("setup", help="Install and verify the complete NVIDIA training runtime")
+    setup.add_argument("-y", "--yes", action="store_true", help="Install without confirmation")
+    setup.add_argument("--dry-run", action="store_true", help="Show what would be installed")
     commands.add_parser("runs", help="List saved runs and verified checkpoint status")
     fit = commands.add_parser("fit-test", help="Run two optimizer steps at configured geometry; not a sustained benchmark")
     fit.add_argument("--config", required=True)
@@ -300,7 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     training = commands.add_parser("train", help="Run model training with hardware-aware thermal pacing")
     training.add_argument("--config", default=None, help="Path to JSON training configuration")
     training.add_argument("--model", default=None, help="Path or name of base model directory")
-    training.add_argument("--dataset", default=None, help="Path to binary token dataset (.bin)")
+    training.add_argument(
+        "--dataset",
+        default=None,
+        help="Path to .txt, .jsonl, .parquet, or prepared .bin training data",
+    )
     training.add_argument(
         "--profile",
         choices=("speed", "balanced", "cool", "energy"),
@@ -432,6 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
 def handle_doctor(ui: TerminalUI, output_func: Any) -> int:
     from molt_stream.training.diagnostics import doctor
     value = doctor()
+    hardware = get_hardware_info()
     output_func(value, title="MOLT Doctor", rows=[
         ("Version", value["version"]), ("Commit", value["git_commit"] or "Installed package"),
         ("Python executable", value["python_executable"]), ("Package", value["package_path"]),
@@ -439,9 +525,10 @@ def handle_doctor(ui: TerminalUI, output_func: Any) -> int:
         ("GPU", value.get("gpu", "CUDA unavailable")),
         ("VRAM", _bytes(value.get("gpu_vram_bytes"))),
         ("System RAM", _bytes(value["system_ram_bytes"])),
+        ("CPU temperature", f"{hardware['cpu_temperature_c']}°C" if hardware["cpu_temperature_c"] is not None else "Sensor unavailable"),
         ("QLoRA packages", "Detected; workload not verified" if value["qlora_8b_ready"] else "Missing optional packages"),
         ("Triton", "Detected; compile probe required" if value["triton"] else "Optional; not installed"),
-        ("Next", "molt config --init | molt prepare --help"),
+        ("Next", "molt"),
     ])
     return 0
 
@@ -459,6 +546,7 @@ def handle_info(ui: TerminalUI, output_func: Any) -> int:
         ("NVIDIA GPU", hw["gpu_name"] or "No discrete NVIDIA GPU detected"),
         ("VRAM", f"{hw['gpu_vram_total_gb']} GB ({hw['gpu_vram_free_gb']} GB free)" if hw["gpu_vram_total_gb"] else "—"),
         ("GPU Temp", f"{hw['gpu_temperature_c']}°C" if hw["gpu_temperature_c"] is not None else "—"),
+        ("CPU Temp", f"{hw['cpu_temperature_c']}°C" if hw["cpu_temperature_c"] is not None else "Sensor unavailable"),
         ("Power Limit", f"{hw['gpu_power_limit_w']} W" if hw["gpu_power_limit_w"] else "—"),
         ("GPU Driver", hw["gpu_driver"] or "—"),
         ("Suggested Profile", hw["suggested_profile"]),
@@ -466,6 +554,105 @@ def handle_info(ui: TerminalUI, output_func: Any) -> int:
     ]
     output_func(hw, title="MOLT Hardware Diagnostics", rows=rows)
     return 0
+
+
+_TRAINING_REQUIREMENTS = {
+    "accelerate": "accelerate>=1.10,<2",
+    "bitsandbytes": "bitsandbytes>=0.48,<1",
+    "peft": "peft>=0.17,<1",
+    "transformers": "transformers>=5,<6",
+    "pyarrow": "pyarrow>=19,<24",
+}
+if sys.platform == "win32":
+    _TRAINING_REQUIREMENTS["triton"] = "triton-windows>=3.4,<3.5"
+    _TRAINING_REQUIREMENTS["wmi"] = "WMI==1.5.1"
+
+
+def _missing_training_requirements() -> list[str]:
+    from packaging.requirements import Requirement
+
+    missing: list[str] = []
+    for module, requirement_text in _TRAINING_REQUIREMENTS.items():
+        requirement = Requirement(requirement_text)
+        if requirement.marker is not None and not requirement.marker.evaluate():
+            continue
+        try:
+            version = importlib.metadata.version(requirement.name)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(requirement_text)
+            continue
+        if importlib.util.find_spec(module) is None or version not in requirement.specifier:
+            missing.append(requirement_text)
+    return missing
+
+
+def handle_setup(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:
+    """Install the complete optional runtime in the active Python environment."""
+    missing = _missing_training_requirements()
+    try:
+        import torch
+        cuda_ready = torch.cuda.is_available() and torch.cuda.device_count() > 0
+    except Exception:
+        cuda_ready = False
+    planned = ([] if cuda_ready else ["torch==2.8.0+cu128"]) + missing
+    if not planned:
+        if ui.enabled:
+            ui.check("MOLT training runtime is already complete")
+        return handle_doctor(ui, output_func)
+    setup_value = {"python": sys.executable, "install": planned, "dry_run": args.dry_run}
+    if ui.enabled:
+        ui.card("MOLT Setup", [("Python", sys.executable), ("Install", ", ".join(planned))])
+    elif args.dry_run:
+        output_func(setup_value, title="MOLT Setup")
+    if args.dry_run:
+        return 0
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise MoltError("Non-interactive setup requires --yes")
+        if not ui.confirm("Install the complete MOLT training runtime?", default=True):
+            return 0
+    installer = [sys.executable, "-m", "pip", "install"]
+    if not cuda_ready:
+        result = subprocess.run(
+            installer + [
+                "torch==2.8.0",
+                "--index-url", "https://download.pytorch.org/whl/cu128",
+            ],
+            check=False,
+        )
+        if result.returncode:
+            raise MoltError("CUDA PyTorch installation failed")
+    if missing:
+        result = subprocess.run(installer + missing, check=False)
+        if result.returncode:
+            raise MoltError("MOLT training dependency installation failed")
+    checked = subprocess.run(
+        [sys.executable, "-m", "pip", "check"], check=False
+    )
+    if checked.returncode:
+        raise MoltError("Installation completed, but dependency verification failed")
+    if ui.enabled:
+        ui.check("Installation complete")
+        ui.card("Next step", [("Command", "molt")])
+    else:
+        output_func({"status": "complete", "next": "molt"}, title="MOLT Setup")
+    return 0
+
+
+def _ensure_training_runtime(ui: TerminalUI) -> None:
+    missing = _missing_training_requirements()
+    if not missing:
+        return
+    if sys.stdin.isatty() and ui.confirm(
+        "Some training components are missing. Install them now?", default=True
+    ):
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", *missing], check=False
+        )
+        if result.returncode == 0:
+            ui.check("Training components installed")
+            return
+    raise MoltError("Training components are missing. Run `molt setup` once, then retry.")
 
 
 def handle_config(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:
@@ -519,8 +706,7 @@ def _verify_cuda_or_prompt_install(ui: TerminalUI, device: str) -> bool:
             ("Fix", "Install PyTorch with NVIDIA CUDA 12.8 wheel"),
         ])
         try:
-            choice = input(ui._style("\nWould you like MOLT to install CUDA PyTorch now? [Y/n]: ", ui.GREEN)).strip().lower()
-            if choice in ("", "y", "yes"):
+            if ui.confirm("Install CUDA PyTorch now?", default=True):
                 print("[MOLT] Installing CUDA-accelerated PyTorch... (downloading official PyTorch cu128 wheel)")
                 uv = shutil.which("uv")
                 if uv:
@@ -550,89 +736,148 @@ def _verify_cuda_or_prompt_install(ui: TerminalUI, device: str) -> bool:
     )
 
 
+def _guided_path(
+    ui: TerminalUI,
+    title: str,
+    items: list[dict[str, Any]],
+    *,
+    prompt: str,
+) -> str:
+    if items and ui.enabled:
+        choices = [
+            (
+                str(item["name"]),
+                str(item["path"]),
+            )
+            for item in items
+        ] + [("Choose another path…", "")]
+        selected = ui.select(title, choices)
+        if selected is not None and selected < len(items):
+            return str(items[selected]["path"])
+    value = input(prompt).strip().strip("'\"")
+    if not value:
+        raise MoltError(f"{title} is required")
+    return value
+
+
+def _model_spec_from_local_config(model_path: str, context_length: int) -> ModelSpec:
+    config_path = Path(model_path) / "config.json"
+    if not config_path.is_file():
+        raise MoltError(f"Model config not found: {config_path}")
+    config = json.loads(config_path.read_text("utf-8"))
+
+    def required(*names: str) -> int:
+        for name in names:
+            value = config.get(name)
+            if isinstance(value, int) and value > 0:
+                return value
+        raise MoltError(f"Model config does not provide {names[0]}")
+
+    model_limit = int(config.get("max_position_embeddings", context_length))
+    return ModelSpec(
+        vocab_size=required("vocab_size"),
+        context_length=min(context_length, model_limit),
+        layers=required("num_hidden_layers", "n_layer"),
+        width=required("hidden_size", "n_embd"),
+        heads=required("num_attention_heads", "n_head"),
+        hidden_width=required("intermediate_size", "n_inner"),
+    )
+
+
+def _prepare_guided_dataset(dataset_path: str, model_path: str, ui: TerminalUI) -> tuple[Path, Path | None, int]:
+    source = Path(dataset_path).resolve()
+    if not source.is_file():
+        raise MoltError(f"Dataset not found: {source}")
+    if source.suffix.lower() == ".bin":
+        validation = source.with_name("validation.bin")
+        tokens = source.stat().st_size // 4
+        if not validation.is_file() or validation == source:
+            raise MoltError(
+                "Prepared train.bin requires a separate validation.bin in the same directory"
+            )
+        return source, validation, tokens
+    if source.suffix.lower() not in {".txt", ".jsonl", ".parquet"}:
+        raise MoltError("Dataset must be .txt, .jsonl, .parquet, or prepared .bin")
+    destination = Path("molt-workspace/datasets") / (
+        f"{source.stem}-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
+    ui.check("Preparing and validating the selected dataset")
+    if source.suffix.lower() in {".jsonl", ".parquet"}:
+        from molt_stream.data.records import prepare_records
+
+        result = prepare_records(source, model_path, destination, base_model=model_path)
+    else:
+        from molt_stream.data.text import prepare_text
+
+        result = prepare_text(source, model_path, destination, base_model=model_path)
+    return (
+        Path(result["directory"]) / "train.bin",
+        Path(result["directory"]) / "validation.bin",
+        int(result["train_tokens"]),
+    )
+
+
+def _interactive_interrupt_decision(ui: TerminalUI) -> tuple[bool, bool]:
+    ui.finish_progress()
+    print()
+    if not ui.confirm("Stop training?", default=False):
+        ui.check("Training continues")
+        return False, True
+    save = ui.confirm("Save a verified checkpoint to resume later?", default=True)
+    ui.check("Stopping safely at the completed update boundary")
+    return True, save
+
+
 def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:
     """Interactive guided training flow for users without full command arguments."""
     from molt_stream.training.engine import train
 
     spec: TrainingSpec
+    guided_spec = not bool(args.config)
     if args.config:
         spec = load_spec(args.config)
     else:
-        # 1. Select Model
-        model_path = args.model
-        if not model_path:
-            models = find_models()
-            if models and ui.enabled:
-                print(ui._style("\n--- Detected Models ---", ui.BOLD))
-                for idx, m in enumerate(models, start=1):
-                    print(f"  {idx}. {m['name']} ({m['path']})")
-                print(f"  {len(models) + 1}. Enter custom path...")
-                choice = input(ui._style(f"Select a model [1-{len(models) + 1}] (default: 1): ", ui.GREEN)).strip()
-                clean_choice = choice.strip('\'"')
-                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(models):
-                    model_path = models[int(clean_choice) - 1]["path"]
-                elif clean_choice == str(len(models) + 1):
-                    model_path = input(ui._style("Enter model directory path: ", ui.GREEN)).strip('\'"')
-                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
-                    model_path = clean_choice
-                elif not clean_choice:
-                    model_path = models[0]["path"]
-                else:
-                    model_path = clean_choice
-            elif not models:
-                model_path = input(ui._style("Enter base model directory path: ", ui.GREEN)).strip('\'"')
-                if not model_path:
-                    raise MoltError("No model specified. Place models in models/ or pass --model.")
-
-        # 2. Select Dataset
-        dataset_path = args.dataset
-        if not dataset_path:
-            datasets = find_datasets()
-            if datasets and ui.enabled:
-                print(ui._style("\n--- Detected Datasets ---", ui.BOLD))
-                for idx, d in enumerate(datasets, start=1):
-                    tokens_label = f"{d['estimated_tokens']:,} tokens" if d["estimated_tokens"] else "binary"
-                    print(f"  {idx}. {d['name']} ({tokens_label}) [{d['path']}]")
-                print(f"  {len(datasets) + 1}. Enter custom path...")
-                choice = input(ui._style(f"Select a dataset [1-{len(datasets) + 1}] (default: 1): ", ui.GREEN)).strip()
-                clean_choice = choice.strip('\'"')
-                if clean_choice.isdigit() and 1 <= int(clean_choice) <= len(datasets):
-                    dataset_path = datasets[int(clean_choice) - 1]["path"]
-                elif clean_choice == str(len(datasets) + 1):
-                    dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
-                elif clean_choice and (Path(clean_choice).exists() or "/" in clean_choice or "\\" in clean_choice):
-                    dataset_path = clean_choice
-                elif not clean_choice:
-                    dataset_path = datasets[0]["path"]
-                else:
-                    dataset_path = clean_choice
-            elif not datasets:
-                dataset_path = input(ui._style("Enter dataset path (.bin): ", ui.GREEN)).strip('\'"')
-                if not dataset_path:
-                    raise MoltError("No dataset specified. Place token files in datasets/ or pass --dataset.")
-
-        # 3. Select Profile
-        profile_name = args.profile
-        if not profile_name and ui.enabled:
-            print(ui._style("\n--- Training Profiles ---", ui.BOLD))
-            profiles_list = list(PROFILES.items())
-            for idx, (k, p) in enumerate(profiles_list, start=1):
-                rec = " (Recommended for Laptop)" if k == "balanced" else ""
-                print(f"  {idx}. {p['name']}: {p['description']}{rec}")
-            choice = input(ui._style("Select profile [1-4] (default: 2 - BALANCED): ", ui.GREEN)).strip()
-            if choice.isdigit() and 1 <= int(choice) <= len(profiles_list):
-                profile_name = profiles_list[int(choice) - 1][0]
-            else:
-                profile_name = "balanced"
-        elif not profile_name:
-            profile_name = "balanced"
-
-        # Build spec
-        ctx = args.context_length or 1024
+        _ensure_training_runtime(ui)
+        model_path = args.model or _guided_path(
+            ui, "Select a local model", find_models(), prompt="Local model directory: "
+        )
+        dataset_path = args.dataset or _guided_path(
+            ui, "Select training data", find_datasets(),
+            prompt="Training data (.txt, .jsonl, .parquet, or .bin): ",
+        )
+        ctx = args.context_length or 256
         bs = args.batch_size or 1
-        steps = args.steps or 878
-        lr = args.learning_rate or 0.00015
-        seed = args.seed or 2026
+        lr = args.learning_rate or 0.0002
+        seed = args.seed or 1337
+        profile_name = args.profile or "balanced"
+        if ui.enabled and not any(
+            value is not None
+            for value in (args.context_length, args.batch_size, args.learning_rate, args.steps, args.profile)
+        ):
+            settings = ui.select(
+                "Training settings",
+                [
+                    ("Recommended", "Context 256, batch 1, balanced thermal policy"),
+                    ("Customize", "Change the important training settings"),
+                ],
+            )
+            if settings == 1:
+                ctx = int(input(f"Context length [{ctx}]: ").strip() or ctx)
+                bs = int(input(f"Batch size [{bs}]: ").strip() or bs)
+                lr = float(input(f"Learning rate [{lr}]: ").strip() or lr)
+                profiles_list = list(PROFILES.items())
+                selected_profile = ui.select(
+                    "Thermal profile",
+                    [(value["name"], value["description"]) for _, value in profiles_list],
+                    default=1,
+                )
+                profile_name = profiles_list[selected_profile or 0][0]
+
+        train_path, validation_path, token_count = _prepare_guided_dataset(
+            dataset_path, model_path, ui
+        )
+        steps = args.steps or max(1, (token_count - 1) // (ctx * bs))
+        model_spec = _model_spec_from_local_config(model_path, ctx)
 
         spec = TrainingSpec(
             mode="qlora",
@@ -643,10 +888,10 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             learning_rate=lr,
             max_steps=steps,
             seed=seed,
-            model=ModelSpec(context_length=ctx, layers=24, width=896, hidden_width=4864, heads=14, vocab_size=151936),
+            model=model_spec,
             data=DataSpec(
-                path=str(Path(dataset_path).resolve()),
-                validation_path=None,
+                path=str(train_path.resolve()),
+                validation_path=str(validation_path.resolve()) if validation_path else None,
                 context_length=ctx,
                 storage_dtype="int32",
                 sequential=True,
@@ -658,7 +903,15 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
                 lora_alpha=16.0,
                 lora_target_modules="all-linear",
                 pin_host_memory=True,
+                cuda_graphs=True,
             ),
+            qlora_autocast=True,
+            qlora_fused_optimizer=True,
+            qlora_joint_cuda_graph=True,
+            thermal_startup_max_c=55.0,
+            thermal_cpu_startup_max_c=70.0,
+            thermal_startup_dwell_seconds=5.0,
+            thermal_startup_timeout_seconds=300.0,
         )
         spec = apply_profile(spec, profile_name)
 
@@ -695,7 +948,13 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
             ("Thermal Target", f"{spec.thermal_target_c:.1f}°C (pause: {int(spec.thermal_pause_seconds*1000)}ms)"),
             ("Thermal Policy", spec.thermal_control_mode),
             ("Thermal Abort", f"{spec.thermal_abort_c:.1f}°C"),
+            ("Start Cooling", (
+                f"GPU ≤ {spec.thermal_startup_max_c}°C; CPU ≤ {spec.thermal_cpu_startup_max_c}°C"
+                if spec.thermal_startup_max_c is not None or spec.thermal_cpu_startup_max_c is not None
+                else "Not configured"
+            )),
             ("GPU Detected", hw["gpu_name"] or "CUDA Device"),
+            ("Current CPU Temp", f"{hw['cpu_temperature_c']}°C" if hw["cpu_temperature_c"] is not None else "Sensor unavailable"),
             ("VRAM requirement", "Measured during training; fit not guaranteed"),
         ])
 
@@ -710,15 +969,34 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
         return 0
 
     if not args.yes and ui.enabled and sys.stdin.isatty():
-        proceed = input(ui._style("\nReady to begin training? [Y/n]: ", ui.GREEN)).strip().lower()
-        if proceed and proceed not in ("y", "yes"):
+        if not ui.confirm("Run the safety check and begin training?", default=True):
             print("[MOLT] Training cancelled by user.")
             return 0
 
     with prioritized_execution(selected_mode == "prioritize") as elevated:
         if ui.enabled and selected_mode == "prioritize":
             ui.check("Temporary MOLT priority enabled" if elevated else "Using standard process priority")
-        path = train(spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+        if guided_spec:
+            ui.check("Running a two-step model, memory, and optimizer safety check")
+            fit_spec = replace(
+                spec,
+                max_steps=2,
+                qlora_validation_batches=min(4, spec.qlora_validation_batches),
+                artifacts_dir=str(Path(spec.artifacts_dir) / "fit-tests"),
+            )
+            fit_path = train(fit_spec, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+            fit_summary = json.loads((fit_path / "metrics.summary.json").read_text("utf-8"))
+            if fit_summary.get("state") != "completed":
+                raise MoltError("The automatic fit test did not complete; full training was not started")
+            ui.finish_progress()
+            ui.check("Safety check passed; starting the full run")
+        path = train(
+            spec,
+            use_galore=args.galore,
+            progress=ui.progress if ui.enabled else None,
+            interrupt_decision=(lambda: _interactive_interrupt_decision(ui))
+            if ui.enabled and sys.stdin.isatty() else None,
+        )
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
     title = "Training complete" if summary.get("state") == "completed" else "Training stopped"
@@ -736,18 +1014,21 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
         if not runs:
             raise MoltError("No prior training runs detected in workspace to resume.")
         if ui.enabled:
-            print(ui._style("\n--- Prior Training Runs ---", ui.BOLD))
-            for idx, r in enumerate(runs[:8], start=1):
-                ckpt_status = f"Checkpoint: {r['integrity']}" if r["checkpoint"] else "No checkpoint"
-                print(f"  {idx}. {r['run_id']} │ Step {r['step']} ({r['tokens']:,} tok) │ {ckpt_status}")
-            print(f"  {min(len(runs), 8) + 1}. Enter custom run path...")
-            choice = input(ui._style(f"Select a run to resume [1-{min(len(runs), 8) + 1}] (default: 1): ", ui.GREEN)).strip()
-            if choice.isdigit() and 1 <= int(choice) <= min(len(runs), 8):
-                run_path = runs[int(choice) - 1]["path"]
-            elif choice == str(min(len(runs), 8) + 1):
-                run_path = input(ui._style("Enter run directory path: ", ui.GREEN)).strip()
+            shown = runs[:8]
+            selected = ui.select(
+                "Select a run to resume",
+                [
+                    (
+                        str(run["run_id"]),
+                        f"Step {run['step']} · {run['tokens']:,} tokens · {run['integrity']}",
+                    )
+                    for run in shown
+                ] + [("Choose another run…", "")],
+            )
+            if selected is not None and selected < len(shown):
+                run_path = shown[selected]["path"]
             else:
-                run_path = runs[0]["path"]
+                run_path = input(ui._style("Enter run directory path: ", ui.GREEN)).strip()
         else:
             run_path = runs[0]["path"]
 
@@ -764,7 +1045,14 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
     with prioritized_execution(selected_mode == "prioritize") as elevated:
         if ui.enabled and selected_mode == "prioritize":
             ui.check("Temporary MOLT priority enabled" if elevated else "Using standard process priority")
-        path = train(spec, resume=root, use_galore=args.galore, progress=ui.progress if ui.enabled else None)
+        path = train(
+            spec,
+            resume=root,
+            use_galore=args.galore,
+            progress=ui.progress if ui.enabled else None,
+            interrupt_decision=(lambda: _interactive_interrupt_decision(ui))
+            if ui.enabled and sys.stdin.isatty() else None,
+        )
     ui.finish_progress()
     summary = json.loads((path / "metrics.summary.json").read_text("utf-8"))
     title = "Training resumed" if summary.get("state") == "completed" else "Training stopped"
@@ -852,24 +1140,23 @@ def guided_landing(ui: TerminalUI) -> int:
     ui.card("MOLT AI Infrastructure", [
         ("Version", f"v{__version__} (Alpha)"),
         ("Hardware", f"{gpu_label} {vram_label}".strip()),
+        ("Temperatures", f"GPU {hw['gpu_temperature_c'] if hw['gpu_temperature_c'] is not None else '—'}°C · CPU {hw['cpu_temperature_c'] if hw['cpu_temperature_c'] is not None else 'sensor unavailable'}"),
         ("Recommended Profile", hw["suggested_profile"]),
         ("Architecture", "Dual-Gear Thermal Control • 4-bit NF4 QLoRA • Memory-Mapped I/O"),
     ])
 
-    print(ui._style("\nSelect an action:", ui.BOLD))
-    print(ui._style("  1. Train", ui.WHITE) + "             Start a new training run")
-    print(ui._style("  2. Resume", ui.WHITE) + "            Resume from a verified checkpoint")
-    print(ui._style("  3. Benchmark", ui.WHITE) + "         Run a synthetic hardware smoke test")
-    print(ui._style("  4. Doctor", ui.WHITE) + "            Check installation identity and hardware")
-    print(ui._style("  5. Prepare Data", ui.WHITE) + "        Convert text, JSONL, or Parquet for training")
-    print(ui._style("  6. Configuration", ui.WHITE) + "     Initialize workspace and list assets")
-    print(ui._style("  7. Exit", ui.MUTED))
-
-    try:
-        choice = input(ui._style("\nOption [1-7]: ", ui.GREEN)).strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return 0
+    choice = ui.select(
+        "Select an action",
+        [
+            ("Train", "Choose a model and dataset, then start safely"),
+            ("Resume", "Continue from a verified checkpoint"),
+            ("Benchmark", "Run a synthetic hardware smoke test"),
+            ("Doctor", "Check installation and hardware"),
+            ("Prepare Data", "Convert text, JSONL, or Parquet"),
+            ("Configuration", "Initialize workspace and list assets"),
+            ("Exit", ""),
+        ],
+    )
 
     dummy_args = argparse.Namespace(
         config=None, model=None, dataset=None, profile=None, steps=None,
@@ -884,24 +1171,22 @@ def guided_landing(ui: TerminalUI) -> int:
         else:
             _print(v)
 
-    if choice == "1":
+    if choice == 0:
         return handle_guided_train(dummy_args, ui, output_func)
-    elif choice == "2":
+    elif choice == 1:
         return handle_guided_resume(dummy_args, ui, output_func)
-    elif choice == "3":
+    elif choice == 2:
         return handle_benchmark_cmd(dummy_args, ui, output_func)
-    elif choice == "4":
+    elif choice == 3:
         return handle_doctor(ui, output_func)
-    elif choice == "5":
+    elif choice == 4:
         return handle_guided_prepare(ui, output_func)
-    elif choice == "6":
+    elif choice == 5:
         return handle_config(dummy_args, ui, output_func)
-    elif choice == "7":
+    elif choice == 6 or choice is None:
         print("[MOLT] Exiting.")
         return 0
-    else:
-        print(ui._style("Invalid selection.", ui.RED))
-        return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -935,6 +1220,8 @@ def main(argv: list[str] | None = None) -> int:
             return guided_landing(ui)
         if args.command == "doctor":
             return handle_doctor(ui, output)
+        elif args.command == "setup":
+            return handle_setup(args, ui, output)
         elif args.command == "runs":
             output(find_runs(), title="Saved runs")
         elif args.command == "export":
@@ -1000,10 +1287,10 @@ def main(argv: list[str] | None = None) -> int:
             if not args.yes:
                 if not ui.enabled or not sys.stdin.isatty():
                     raise ValueError("Temporary GPU clock changes require -y in non-interactive mode")
-                answer = input(
-                    "Temporarily lock GPU clocks to 1500-1650 MHz for this run? [y/N]: "
-                ).strip().lower()
-                if answer not in {"y", "yes"}:
+                if not ui.confirm(
+                    "Temporarily lock GPU clocks to 1500-1650 MHz for this run?",
+                    default=False,
+                ):
                     return 0
             spec = load_spec(args.config)
             profile = GPU_PROFILES[args.profile]

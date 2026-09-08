@@ -22,8 +22,9 @@ from molt_stream.measurement.thermal import (
     build_thermal_controller,
     duty_cycle_pause_seconds,
     latest_telemetry_point,
+    latest_cpu_temperature_c,
     latest_temperature_c,
-    wait_for_stable_thermal_headroom,
+    wait_for_stable_system_headroom,
 )
 from molt_stream.kernels.compiler import prepare_execution_model
 from molt_stream.training.galore import GaLoreAdamW
@@ -66,12 +67,18 @@ def train(
     resume: str | Path | None = None,
     use_galore: bool = False,
     progress: Callable[[ProgressEvent], None] | None = None,
+    interrupt_decision: Callable[[], tuple[bool, bool]] | None = None,
 ) -> Path:
     spec.validate()
     if spec.mode == TrainingMode.QLORA:
         from molt_stream.training.qlora import train_qlora
 
-        return train_qlora(spec, resume=resume, progress=progress)
+        return train_qlora(
+            spec,
+            resume=resume,
+            progress=progress,
+            interrupt_decision=interrupt_decision,
+        )
     device = torch.device(spec.stream.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise CapabilityError("CUDA training requested but unavailable")
@@ -97,23 +104,24 @@ def train(
     telemetry = NVMLTelemetry(0.1, enable_gpu=device.type == "cuda")
     telemetry.start()
     startup_cooling_seconds = 0.0
-    if device.type == "cuda" and spec.thermal_startup_max_c is not None:
-        startup = wait_for_stable_thermal_headroom(
+    if device.type == "cuda" and (
+        spec.thermal_startup_max_c is not None
+        or spec.thermal_cpu_startup_max_c is not None
+    ):
+        startup = wait_for_stable_system_headroom(
             telemetry.thermal_point,
-            maximum_c=spec.thermal_startup_max_c,
+            maximum_gpu_c=spec.thermal_startup_max_c,
+            maximum_cpu_c=spec.thermal_cpu_startup_max_c,
             dwell_seconds=spec.thermal_startup_dwell_seconds,
             maximum_wait_seconds=spec.thermal_startup_timeout_seconds,
             notify=(
-                lambda paused, current: progress(
+                lambda paused, gpu_current, cpu_current: progress(
                     ProgressEvent(
-                        "startup",
-                        message=(
-                            f"Cooling to <= {spec.thermal_startup_max_c:.1f} C "
-                            f"for {spec.thermal_startup_dwell_seconds:.0f}s "
-                            f"({current if current is not None else 'no sensor'} C)"
-                        ),
+                        "step", step=0, total_steps=spec.max_steps,
+                        elapsed_seconds=paused,
                         thermal_state="startup-cooling",
-                        gpu_temperature_c=current,
+                        gpu_temperature_c=gpu_current,
+                        cpu_temperature_c=cpu_current,
                         thermal_pause_seconds=paused,
                     )
                 )
@@ -125,6 +133,11 @@ def train(
             telemetry.stop()
             raise RuntimeError(startup.stop_reason)
         startup_cooling_seconds = startup.pause_seconds
+        if progress and spec.thermal_cpu_startup_max_c is not None and not startup.cpu_sensor_available:
+            progress(ProgressEvent(
+                "startup",
+                "CPU temperature sensor unavailable; GPU startup cooling passed",
+            ))
     power_limit_status = (
         manage_power_limit(spec.power_limit_watts, apply=False)
         if device.type == "cuda" and spec.power_limit_watts is not None else None
@@ -168,6 +181,24 @@ def train(
             torch.cuda.set_rng_state_all(state["cuda_rng"])
     initial_nll = _evaluate(model, validation_batcher)
     evaluations = [{"step": step, "nll": initial_nll, "perplexity": math.exp(initial_nll)}]
+    from molt_stream.training.qlora import _InterruptLatch
+
+    interrupt = _InterruptLatch()
+    interrupt.install()
+    stop_requested = False
+    save_interrupted_checkpoint = True
+
+    def process_interrupt() -> bool:
+        nonlocal stop_requested, save_interrupted_checkpoint
+        if not interrupt.requested:
+            return False
+        interrupt.requested = False
+        stop, save = interrupt_decision() if interrupt_decision else (True, True)
+        if stop:
+            stop_requested = True
+            save_interrupted_checkpoint = save
+        return stop_requested
+
     training_started = time.perf_counter()
     thermal_abort = False
     thermal_pause_count = 0
@@ -175,7 +206,9 @@ def train(
     thermal_phase_counts: dict[str, int] = {}
     regulator = build_thermal_controller(spec) if device.type == "cuda" else None
     compiler_announced = spec.execution_backend == "eager"
-    while step < spec.max_steps:
+    while step < spec.max_steps and not stop_requested:
+        if process_interrupt():
+            break
         step_started = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         loss_sum = 0.0
@@ -225,6 +258,7 @@ def train(
                     step=step,
                     total_steps=spec.max_steps,
                     gpu_temperature_c=temperature,
+                    cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                     thermal_state="thermal-abort",
                 ))
             break
@@ -245,6 +279,7 @@ def train(
                         step=step,
                         total_steps=spec.max_steps,
                         gpu_temperature_c=post_pause_temperature,
+                        cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                         thermal_state="thermal-abort",
                         initial_step=initial_step,
                     ))
@@ -261,6 +296,7 @@ def train(
                 loss=loss_sum,
                 vram_bytes=(torch.cuda.memory_allocated() if device.type == "cuda" else None),
                 gpu_temperature_c=temperature,
+                cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                 thermal_state=thermal_state,
                 thermal_pause_seconds=pause,
                 initial_step=initial_step,
@@ -268,21 +304,31 @@ def train(
         if step == spec.max_steps or step % max(1, spec.max_steps // 4) == 0:
             nll = _evaluate(model, validation_batcher)
             evaluations.append({"step": step, "nll": nll, "perplexity": math.exp(nll), "train_loss": loss_sum})
+        if process_interrupt():
+            break
     training_seconds = time.perf_counter() - training_started
+    interrupt.restore()
+    termination_reason = (
+        "thermal_abort" if thermal_abort else "interrupted" if stop_requested else "completed"
+    )
     state = {
         "model": model.state_dict(), "optimizer": optimizer.state_dict(),
         "batcher": batcher.state_dict(), "step": step, "tokens": tokens,
         "python_rng": random.getstate(), "torch_rng": torch.get_rng_state(),
         "cuda_rng": torch.cuda.get_rng_state_all() if device.type == "cuda" else None,
-        "termination_reason": "thermal_abort" if thermal_abort else "completed",
+        "termination_reason": termination_reason,
     }
-    checkpoint_path = store.save(state)
+    checkpoint_path = (
+        store.save(state)
+        if not stop_requested or save_interrupted_checkpoint
+        else None
+    )
     measured = telemetry.stop()
     seconds = time.perf_counter() - total_started
     session_tokens = tokens - initial_tokens
     conditioned_seconds = max(0.0, seconds - startup_cooling_seconds)
     summary = {
-        "state": "thermal_abort" if thermal_abort else "completed",
+        "state": termination_reason,
         "thermal_abort": thermal_abort, "mode": spec.mode, "step": step, "tokens": tokens,
         "session_tokens": session_tokens,
         "seconds": seconds, "training_loop_seconds": training_seconds,
@@ -313,7 +359,7 @@ def train(
             "phase_counts": thermal_phase_counts,
         },
         "power_limit": power_limit_status,
-        "checkpoint": str(checkpoint_path),
+        "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
         "telemetry": {key: value for key, value in measured.items() if key != "points"},
     }
     energy = measured.get("gpu_board_energy_joules")
