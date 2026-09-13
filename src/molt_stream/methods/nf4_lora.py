@@ -7,19 +7,17 @@ import torch
 from torch.nn import functional as F
 
 from molt_stream.core.errors import CapabilityError
-from molt_stream.methods.nf4_backward import (
-    packed_nf4_lora_backward_input,
-    resolved_nf4_scales,
-)
 
 
 class _ScheduledNF4LoRA(torch.autograd.Function):
-    """Exact first-order NF4 + LoRA dataflow with a manually scheduled backward.
+    """Experimental first-order NF4 + LoRA manually scheduled backward.
 
     The NF4 forward remains the installed bitsandbytes GEMM. The custom backward
     computes the frozen-base input gradient and both adapter gradients without
     retaining PEFT's separate LoRA autograd graph. This is an experimental
     scheduling optimization, not a claim that the NF4 GEMM itself is novel.
+    Full-model qualification is projection-specific: equivalent real-valued
+    derivatives alone do not establish identical BF16 branch accumulation.
     """
 
     @staticmethod
@@ -31,6 +29,7 @@ class _ScheduledNF4LoRA(torch.autograd.Function):
         lora_b: torch.Tensor,
         quant_state: Any,
         scaling: float,
+        decoded_backward_weight: torch.Tensor | None,
     ) -> torch.Tensor:
         import bitsandbytes as bnb
 
@@ -48,47 +47,67 @@ class _ScheduledNF4LoRA(torch.autograd.Function):
         )
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=x.dtype == torch.bfloat16):
             low_rank = F.linear(x, lora_a)
-            result = base.add(F.linear(low_rank, lora_b), alpha=float(scaling))
+            result = base + F.linear(low_rank, lora_b) * float(scaling)
 
         ctx.quant_state = quant_state
-        ctx.resolved_scales = resolved_nf4_scales(quant_state)
         ctx.scaling = float(scaling)
         ctx.input_shape = x.shape
-        ctx.save_for_backward(x, packed_weight, lora_a, lora_b)
+        if decoded_backward_weight is not None and (
+            decoded_backward_weight.shape != (lora_b.shape[0], x.shape[-1])
+            or decoded_backward_weight.device != x.device
+            or decoded_backward_weight.dtype != x.dtype
+        ):
+            raise CapabilityError(
+                "cached NF4 backward weight must match the decoded weight geometry, "
+                "device, and compute dtype"
+            )
+        ctx.has_cached_backward_weight = decoded_backward_weight is not None
+        saved = (x, packed_weight, lora_a, lora_b)
+        if decoded_backward_weight is not None:
+            saved += (decoded_backward_weight,)
+        ctx.save_for_backward(*saved)
         return result
 
     @staticmethod
     @torch.autograd.function.once_differentiable
     def backward(
         ctx: Any, grad_output: torch.Tensor
-    ) -> tuple[torch.Tensor, None, torch.Tensor, torch.Tensor, None, None]:
-        x, packed_weight, lora_a, lora_b = ctx.saved_tensors
+    ) -> tuple[torch.Tensor, None, torch.Tensor, torch.Tensor, None, None, None]:
+        x, packed_weight, lora_a, lora_b, *cached = ctx.saved_tensors
         flat_x = x.reshape(-1, x.shape[-1])
         flat_grad = grad_output.reshape(-1, grad_output.shape[-1])
         scale = ctx.scaling
+
+        import bitsandbytes.functional as bnb_functional
 
         with torch.autocast(
             "cuda", dtype=torch.bfloat16, enabled=flat_x.dtype == torch.bfloat16
         ):
             low_rank = flat_x @ lora_a.t()
-            grad_through_b = flat_grad @ lora_b
-            grad_x = packed_nf4_lora_backward_input(
-                flat_grad,
-                packed_weight,
-                ctx.quant_state,
-                grad_through_b,
-                lora_a,
-                scale,
-                ctx.resolved_scales,
+            # Match autograd's scale-before-matmul boundary. Scaling the
+            # resulting gradients afterward is not equivalent in BF16.
+            scaled_grad = flat_grad * scale
+            grad_through_b = scaled_grad @ lora_b
+            # The packed contraction failed production-shape differential
+            # tests. Use the same dequantize + matmul as bitsandbytes until
+            # that kernel independently qualifies. This retains a dense
+            # temporary and makes no packed-memory saving claim.
+            decoded = (
+                cached[0]
+                if ctx.has_cached_backward_weight
+                else bnb_functional.dequantize_4bit(packed_weight, ctx.quant_state)
             )
-            grad_b = flat_grad.t() @ low_rank
+            grad_base = flat_grad @ decoded.to(flat_grad.dtype)
+            grad_x = grad_base + grad_through_b @ lora_a
+            grad_b = scaled_grad.t() @ low_rank
             grad_a = grad_through_b.t() @ flat_x
 
         return (
             grad_x.reshape(ctx.input_shape),
             None,
-            grad_a.mul(scale).to(lora_a.dtype),
-            grad_b.mul(scale).to(lora_b.dtype),
+            grad_a.to(lora_a.dtype),
+            grad_b.to(lora_b.dtype),
+            None,
             None,
             None,
         )
@@ -101,15 +120,27 @@ def scheduled_nf4_lora(
     lora_b: torch.Tensor,
     quant_state: Any,
     scaling: float,
+    decoded_backward_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return _ScheduledNF4LoRA.apply(
-        x, packed_weight, lora_a, lora_b, quant_state, scaling
+        x,
+        packed_weight,
+        lora_a,
+        lora_b,
+        quant_state,
+        scaling,
+        decoded_backward_weight,
     )
 
 
 def _scheduled_forward(module: torch.nn.Module, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
     """PEFT Linear4bit adapter entry point with strict safe fallback."""
-    if args or kwargs or module.disable_adapters or module.merged:
+    if (
+        args or kwargs or module.disable_adapters or module.merged
+        or x.dtype != torch.bfloat16
+        or not torch.is_autocast_enabled("cuda")
+        or torch.get_autocast_dtype("cuda") != torch.bfloat16
+    ):
         return module._molt_original_forward(x, *args, **kwargs)
     active = list(module.active_adapters)
     if len(active) != 1:
@@ -130,6 +161,7 @@ def _scheduled_forward(module: torch.nn.Module, x: torch.Tensor, *args: Any, **k
         module.lora_B[adapter].weight,
         module.base_layer.weight.quant_state,
         float(module.scaling[adapter]),
+        getattr(module, "_molt_decoded_backward_weight", None),
     )
 
 
@@ -138,12 +170,16 @@ def enable_scheduled_nf4_lora(
     *,
     module_suffixes: tuple[str, ...] | None = None,
     require_narrow_output: bool = False,
+    cache_backward_weights: bool = False,
 ) -> int:
     """Enable the experimental path on selected compatible PEFT modules.
 
     ``module_suffixes`` keeps dispatch tied to projection geometries that have
     passed a randomized component benchmark. A missing suffix list retains the
-    original all-compatible-module behavior for explicit research use.
+    original all-compatible-module behavior for explicit research use only;
+    that broad mode has not passed full-model trajectory qualification.
+    ``cache_backward_weights`` trades dense BF16 residency for eliminating
+    repeated dequantization and is never selected implicitly.
     """
     try:
         from peft.tuners.lora.bnb import Linear4bit
@@ -163,6 +199,16 @@ def enable_scheduled_nf4_lora(
         ):
             continue
         module._molt_original_forward = module.forward
+        if cache_backward_weights:
+            import bitsandbytes.functional as bnb_functional
+
+            with torch.no_grad():
+                module._molt_decoded_backward_weight = (
+                    bnb_functional.dequantize_4bit(
+                        module.base_layer.weight.data,
+                        module.base_layer.weight.quant_state,
+                    ).to(dtype=torch.bfloat16)
+                )
         module.forward = MethodType(_scheduled_forward, module)
         patched += 1
     if patched == 0:

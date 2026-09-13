@@ -29,14 +29,6 @@ warnings.filterwarnings("ignore", message=".*torch.utils.checkpoint.*")
 
 from molt_stream import __version__
 from molt_stream.core.contracts import ProgressEvent
-from molt_stream.core.errors import MoltError
-from molt_stream.core.specs import (
-    DataSpec,
-    ModelSpec,
-    StreamSpec,
-    TrainingSpec,
-    load_spec,
-)
 from molt_stream.core.discovery import (
     find_datasets,
     find_models,
@@ -44,7 +36,15 @@ from molt_stream.core.discovery import (
     get_hardware_info,
     init_workspace,
 )
+from molt_stream.core.errors import MoltError
 from molt_stream.core.profiles import PROFILES, apply_profile
+from molt_stream.core.specs import (
+    DataSpec,
+    ModelSpec,
+    StreamSpec,
+    TrainingSpec,
+    load_spec,
+)
 from molt_stream.core.system_tuning import prioritized_execution
 
 
@@ -269,7 +269,7 @@ def _duration(seconds: float) -> str:
     return f"{hours:d}:{minutes:02d}:{remainder:02d}" if hours else f"{minutes:02d}:{remainder:02d}"
 
 
-def _bytes(num_bytes: int | float | None) -> str:
+def _bytes(num_bytes: float | None) -> str:
     if num_bytes is None:
         return "—"
     value = float(num_bytes)
@@ -397,7 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     training.add_argument(
         "--profile",
-        choices=("speed", "balanced", "cool", "energy"),
+        choices=("speed", "balanced", "cool", "energy", "micro"),
         default=None,
         help="High-level policy profile (speed, balanced, cool, energy)",
     )
@@ -607,7 +607,7 @@ def handle_setup(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> 
     try:
         import torch
         cuda_ready = torch.cuda.is_available() and torch.cuda.device_count() > 0
-    except Exception:
+    except Exception:  # noqa: BLE001 - tolerate a broken optional CUDA runtime during setup.
         cuda_ready = False
     planned = ([] if cuda_ready else ["torch==2.8.0+cu128"]) + missing
     if not planned:
@@ -1018,10 +1018,14 @@ def handle_guided_train(args: argparse.Namespace, ui: TerminalUI, output_func: A
     if not _verify_cuda_or_prompt_install(ui, spec.stream.device):
         return 0
 
-    if not args.yes and ui.enabled and sys.stdin.isatty():
-        if not ui.confirm("Run the safety check and begin training?", default=True):
-            print("[MOLT] Training cancelled by user.")
-            return 0
+    if (
+        not args.yes
+        and ui.enabled
+        and sys.stdin.isatty()
+        and not ui.confirm("Run the safety check and begin training?", default=True)
+    ):
+        print("[MOLT] Training cancelled by user.")
+        return 0
 
     with prioritized_execution(selected_mode == "prioritize") as elevated:
         if ui.enabled and selected_mode == "prioritize":
@@ -1112,8 +1116,10 @@ def handle_guided_resume(args: argparse.Namespace, ui: TerminalUI, output_func: 
 
 def handle_benchmark_cmd(args: argparse.Namespace, ui: TerminalUI, output_func: Any) -> int:
     """Execute smoke or throughput benchmarks."""
-    from molt_stream.training.throughput import training_throughput_benchmark as benchmark_stream_throughput
     from molt_stream.training.engine import train
+    from molt_stream.training.throughput import (
+        training_throughput_benchmark as benchmark_stream_throughput,
+    )
 
     if args.smoke or not args.config:
         if ui.enabled:
@@ -1331,6 +1337,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "optimize-gpu":
             from molt_stream.measurement.gpu_profile import (
                 PROFILES as GPU_PROFILES,
+            )
+            from molt_stream.measurement.gpu_profile import (
                 temporary_graphics_clock,
                 verify_measured_clock_profile,
             )
@@ -1378,7 +1386,10 @@ def main(argv: list[str] | None = None) -> int:
                 write_comparison(args.output, value)
             output(value, title="Run Comparison")
         elif args.command == "compare-paired":
-            from molt_stream.measurement.comparison import aggregate_comparisons, compare_runs
+            from molt_stream.measurement.comparison import (
+                aggregate_comparisons,
+                compare_runs,
+            )
             comparisons = [compare_runs(a, b,
                 quality_tolerance_percent=args.quality_tolerance_percent,
                 minimum_improvement_percent=args.minimum_improvement_percent,
@@ -1426,7 +1437,9 @@ def main(argv: list[str] | None = None) -> int:
             value = run_curriculum_experiment(load_spec(args.config), seeds=tuple(seeds), eval_interval=args.eval_interval)
             output(value, title="Curriculum Benchmark")
         elif args.command == "loss-partition-benchmark":
-            from molt_stream.training.loss_partition import benchmark_exact_loss_partitioning
+            from molt_stream.training.loss_partition import (
+                benchmark_exact_loss_partitioning,
+            )
             chunks = [int(x.strip()) for x in args.chunks.split(",") if x.strip()]
             value = benchmark_exact_loss_partitioning(load_spec(args.config), chunk_sizes=tuple(chunks), warmup_steps=args.warmup_steps, measured_steps=args.steps)
             output(value, title="Loss Partition Benchmark")

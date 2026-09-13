@@ -2,25 +2,26 @@
 
 **Thermally aware, memory-efficient QLoRA fine-tuning for consumer NVIDIA GPUs.**
 
-[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/LICENSE)
-[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/pyproject.toml)
-[![Status: Alpha](https://img.shields.io/badge/Status-Alpha-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/releases/0.11.0-alpha.9.md)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/LICENSE)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-22c55e.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/pyproject.toml)
+[![Status: Research release](https://img.shields.io/badge/Status-Research%20release-4b5563.svg)](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/releases/0.12.0.md)
 [![Tests](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml/badge.svg)](https://github.com/PraveenNimilka/MOLT/actions/workflows/ci.yml)
-[![PyPI: v0.11.0a9](https://img.shields.io/badge/PyPI-v0.11.0a9-blue.svg)](https://pypi.org/project/moltengine/0.11.0a9/)
+[![PyPI: v0.12.0](https://img.shields.io/badge/PyPI-v0.12.0-blue.svg)](https://pypi.org/project/moltengine/0.12.0/)
 
 MOLT provides a Windows-first workflow to prepare data, validate workload fit,
 fine-tune supported local language models, safely resume interrupted runs, and
 export adapters. It includes hardware telemetry, thermal controls, verified
 checkpointing, and experimental optimized execution paths.
 
-**Latest release: 0.11.0a9 · Source-available research alpha.**
+**Latest release: 0.12.0 · Source-available research release.**
 Install the versioned release below; `main` may include unreleased changes.
 Validate workloads before production use.
 
 ## Current evidence
 
-On the development RTX 4060 Laptop GPU, six-pair matched diagnostic screens
-produced the following means against the tested Unsloth configuration:
+On the development RTX 4060 Laptop GPU, the published six-pair matched
+diagnostic screens produced the following means against the tested Unsloth
+configuration:
 
 | Model family | Training time | Board energy | PyTorch allocator peak |
 | --- | ---: | ---: | ---: |
@@ -28,15 +29,25 @@ produced the following means against the tested Unsloth configuration:
 | Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
 | Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
 
-![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
+![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.12.0/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
 
-See the [single reproduction page](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/REPRODUCE_DIAGNOSTIC.md),
-[calculation method, and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/benchmarks/README.md).
+See the [single reproduction page](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/REPRODUCE_DIAGNOSTIC.md),
+[calculation method, and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/benchmarks/README.md).
 
 Every recorded pair favored MOLT for elapsed time and energy. These results are
 diagnostic evidence, not a universal performance claim: graphics clocks were not
 locked, one Gemma competitor arm had a power-limit transient, Soup has not yet
 been compared, and 7B/8B endurance and independent reproduction remain open.
+
+Version 0.12.0 also includes opt-in experimental work for low-overhead update
+attribution, exact frozen-vocabulary loss, scheduled NF4 backward execution,
+bounded gated-MLP replay/offload, graph-memory accounting, and thermal pacing.
+In the latest clean one-million-target Qwen 1.5B seed screen, the qualified
+candidate was 23.00% faster end to end, delivered 38.45% higher training
+throughput, used 1.07% less measured board energy, and reduced allocated and
+reserved VRAM by 12.09% and 9.37%. It did not win every axis: sampled whole-GPU
+peak was 4.65% higher and peak temperature was 7 C higher. This is a single-seed
+development result, not a release-wide or universal superiority claim.
 
 Public documentation covers supported interfaces, observable behavior, and
 reproducible measurements. Internal optimization rationale and development
@@ -56,11 +67,11 @@ Model weights and datasets are not downloaded automatically.
 
 ### Recommended: managed per-user installation
 
-Open PowerShell and run this single command. It downloads the immutable Alpha 9
+Open PowerShell and run this single command. It downloads the immutable 0.12.0
 installer and runs it outside the repository:
 
 ```powershell
-$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.11.0-alpha.9/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "9597912ea5443ac8773d9959d3ad1acc0d32513d254c2a796875455f8e8d2798") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
+$p="$env:TEMP\molt-install.ps1"; Invoke-WebRequest https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.12.0/install-global.ps1 -OutFile $p; if ((Get-FileHash $p -Algorithm SHA256).Hash -ne "75f7de635562447f4246a78634db56b4d11b4664b4c868036d3da1a8ffdeb7f5") { throw "MOLT installer hash mismatch" }; powershell -NoProfile -ExecutionPolicy Bypass -File $p
 ```
 
 The installer creates one runtime at `%LOCALAPPDATA%\MOLT\runtime`, puts one
@@ -87,7 +98,7 @@ molt uninstall
 ### Reproducible source installation
 
 ```powershell
-git clone --branch v0.11.0-alpha.9 --depth 1 https://github.com/PraveenNimilka/MOLT.git
+git clone --branch v0.12.0 --depth 1 https://github.com/PraveenNimilka/MOLT.git
 Set-Location MOLT
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 .\.venv\Scripts\molt.exe doctor
@@ -106,13 +117,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -EagerOnly
 
 `winget install MOLT` is a distribution target, not a currently published
 command; Microsoft must accept a versioned package manifest before it can be
-advertised. See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/INSTALL.md) for troubleshooting.
+advertised. See [the complete installation guide](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/INSTALL.md) for troubleshooting.
 
 ## First training run
 
-Want one copy-and-run example? Follow the [complete beginner recipe](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/BEGINNER_QUICKSTART.md),
-then watch the [75-second measured workflow demonstration](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/demo/molt-launch-demo-75s.mp4)
-and inspect its [full sanitized log](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/demo/session.log).
+Want one copy-and-run example? Follow the [complete beginner recipe](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/BEGINNER_QUICKSTART.md),
+then watch the [75-second measured workflow demonstration](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/demo/molt-launch-demo-75s.mp4)
+and inspect its [full sanitized log](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/demo/session.log).
 
 For the simplest workflow, run:
 
@@ -231,7 +242,7 @@ for arbitrary third-party architectures.
 - Do not publish private paths, data, credentials, or model weights in bug reports.
 
 Report vulnerabilities through GitHub's private security-advisory workflow.
-See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/SECURITY.md).
+See [SECURITY.md](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/SECURITY.md).
 
 ## CLI overview
 
@@ -263,16 +274,16 @@ releases.
 - The final controlled-clock, Soup, large-model endurance, and independent
   comparison gates are not complete.
 
-Read the [0.11.0a9 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/releases/0.11.0-alpha.9.md),
-[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/SUPPORT.md), and
-[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/docs/licensing.md). Dependency attribution and branding
-rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/THIRD_PARTY_NOTICES.md) and
-[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/TRADEMARKS.md).
+Read the [0.12.0 release notes](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/releases/0.12.0.md),
+[CLI reference](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/cli.md), [support policy](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/SUPPORT.md), and
+[licensing boundary](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/licensing.md). Dependency attribution and branding
+rules are recorded in [THIRD_PARTY_NOTICES.md](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/THIRD_PARTY_NOTICES.md) and
+[TRADEMARKS.md](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/TRADEMARKS.md).
 
 ## License
 
 Current MOLT source is available under the
-[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.11.0-alpha.9/LICENSE). It is source-available, not OSI open
+[PolyForm Shield License 1.0.0](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/LICENSE). It is source-available, not OSI open
 source, and restricts use to provide a product that competes with the licensor.
 Models, datasets, and dependencies retain their own licenses. Public Python
 packages can be inspected; the license is a legal boundary, not technical copy

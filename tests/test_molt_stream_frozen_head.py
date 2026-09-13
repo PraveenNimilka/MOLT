@@ -1,5 +1,6 @@
 import pytest
 import torch
+
 from molt_stream.kernels.partitioned_loss import exact_partitioned_linear_cross_entropy
 
 
@@ -24,3 +25,20 @@ def test_trainable_classifier_is_rejected():
         exact_partitioned_linear_cross_entropy(torch.ones(2, 3, requires_grad=True),
             torch.ones(5, 3, requires_grad=True), torch.zeros(2, dtype=torch.long), 1,
             precompute_frozen_gradient=True)
+
+
+def test_no_grad_precomputed_path_preserves_reference_loss():
+    hidden = torch.randn(2, 4, 7, dtype=torch.float64, requires_grad=True)
+    weight = torch.randn(13, 7, dtype=torch.float64)
+    targets = torch.randint(13, (2, 4))
+    reference = torch.nn.functional.cross_entropy((hidden @ weight.T).flatten(0, 1), targets.flatten())
+    with torch.no_grad():
+        actual = exact_partitioned_linear_cross_entropy(
+            hidden,
+            weight,
+            targets,
+            3,
+            precompute_frozen_gradient=True,
+            backend="auto",
+        )
+    torch.testing.assert_close(actual, reference, atol=1e-12, rtol=1e-12)

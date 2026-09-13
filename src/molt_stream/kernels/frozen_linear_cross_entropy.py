@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import torch
@@ -26,6 +25,45 @@ except ImportError:  # pragma: no cover
 if _TRITON_AVAILABLE:
 
     @triton.jit
+    def _fused_ce_loss_kernel_online(
+        logits_ptr,
+        targets_ptr,
+        loss_out_ptr,
+        stride_lm,
+        stride_ln,
+        N: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+        total_tokens: float,
+    ) -> None:
+        """Loss-only prefix of the training kernel, with identical reduction order."""
+        row_id = tl.program_id(0)
+        target = tl.load(targets_ptr + row_id)
+        cols = tl.arange(0, BLOCK_N)
+        valid_target = (target >= 0) & (target < N)
+        target_idx = tl.where(valid_target, target, 0)
+        m_prev = -float("inf")
+        d_prev = 0.0
+        for off in range(0, N, BLOCK_N):
+            mask = (off + cols) < N
+            vals = tl.load(
+                logits_ptr + row_id * stride_lm + (off + cols) * stride_ln,
+                mask=mask,
+                other=-float("inf"),
+            ).to(tl.float32)
+            m_curr = tl.max(vals, axis=0)
+            m_new = tl.maximum(m_prev, m_curr)
+            scaled_prev = tl.where(d_prev > 0.0, d_prev * tl.exp(m_prev - m_new), 0.0)
+            curr_sum = tl.sum(tl.where(mask, tl.exp(vals - m_new), 0.0), axis=0)
+            d_prev = scaled_prev + curr_sum
+            m_prev = m_new
+        lse = m_prev + tl.log(d_prev)
+        target_logit = tl.load(logits_ptr + row_id * stride_lm + target_idx * stride_ln).to(
+            tl.float32
+        )
+        loss = tl.where(valid_target, (lse - target_logit) / total_tokens, 0.0)
+        tl.store(loss_out_ptr + row_id, loss)
+
+    @triton.jit
     def _fused_ce_softmax_grad_kernel_online(
         logits_ptr,
         targets_ptr,
@@ -45,7 +83,7 @@ if _TRITON_AVAILABLE:
         in two streaming passes over vocabulary blocks:
           Pass 1: Numerically stable online row max and sum-of-exponentials.
           Pass 2: Forms softmax probabilities, subtracts 1.0 at target index,
-                  and overwrites the private low-precision chunk buffer with the
+                  and writes a separate low-precision chunk buffer with the
                   scaled gradient (P - 1_y) / total_tokens. This avoids full
                   FP32 logits but still materializes one bounded token chunk.
         """
@@ -75,12 +113,12 @@ if _TRITON_AVAILABLE:
 
         lse = m_prev + tl.log(d_prev)
 
-        # Exact target logit and scalar loss accumulation
+        # Per-row loss storage avoids nondeterministic cross-CTA atomics.
         target_logit = tl.load(logits_ptr + row_id * stride_lm + target_idx * stride_ln).to(
             tl.float32
         )
         loss = tl.where(valid_target, (lse - target_logit) / total_tokens, 0.0)
-        tl.atomic_add(loss_out_ptr, loss)
+        tl.store(loss_out_ptr + row_id, loss)
 
         # 2. Compute softmax - 1(target) and store directly in output tensor dtype
         for off in range(0, N, BLOCK_N):
@@ -140,7 +178,7 @@ def _analytical_frozen_head_forward(
     return total, gradient.reshape_as(hidden)
 
 
-def _triton_frozen_head_forward(
+def _separated_triton_frozen_head_forward(
     hidden: torch.Tensor,
     weight: torch.Tensor,
     targets: torch.Tensor,
@@ -151,7 +189,7 @@ def _triton_frozen_head_forward(
     flat_targets = targets.reshape(-1).contiguous()
     token_count = flat_targets.numel()
     hidden_gradient = torch.empty_like(flat_hidden)
-    loss_total = torch.zeros((), device=hidden.device, dtype=torch.float32)
+    loss_rows = torch.empty(token_count, device=hidden.device, dtype=torch.float32)
 
     N = weight.shape[0]
     if N >= 4096:
@@ -172,18 +210,19 @@ def _triton_frozen_head_forward(
         # Preserve the frozen head's native layout. Calling contiguous() here
         # copied Qwen's 151,936 x 1,536 head on every microbatch.
         logits = F.linear(compute_part, weight)
-        # The projection is a private temporary. Overwrite it with dL/dlogits
-        # during the Triton pass instead of allocating a second [chunk, vocab]
-        # probability buffer.
+        # Keep logits immutable until every warp has consumed the target
+        # logit and normalization data. An aliased output risks read/write
+        # ordering hazards. This correctness path uses a second chunk buffer.
+        logit_gradient = torch.empty_like(logits)
         _fused_ce_softmax_grad_kernel_online[(c_len,)](
             logits,
             sub_targets,
-            logits,
-            loss_total,
+            logit_gradient,
+            loss_rows[start:end],
             logits.stride(0),
             logits.stride(1),
-            logits.stride(0),
-            logits.stride(1),
+            logit_gradient.stride(0),
+            logit_gradient.stride(1),
             N,
             block_n,
             float(token_count),
@@ -191,10 +230,68 @@ def _triton_frozen_head_forward(
         )
 
         # Backward GEMM (FP16/BF16 Tensor Cores via cuBLAS)
-        local_gradient = logits @ weight
+        local_gradient = logit_gradient @ weight
         hidden_gradient[start:end].copy_(local_gradient)
 
-    return loss_total, hidden_gradient.reshape_as(hidden)
+    return loss_rows.sum(), hidden_gradient.reshape_as(hidden)
+
+
+def frozen_linear_cross_entropy_loss_only(
+    hidden: torch.Tensor,
+    weight: torch.Tensor,
+    targets: torch.Tensor,
+    chunk_size: int = 256,
+) -> torch.Tensor:
+    """Evaluate the training kernel's exact loss without its discarded gradient pass."""
+    _validate_inputs(hidden, weight, targets, chunk_size)
+    if not triton_frozen_loss_supported(hidden, weight):
+        raise RuntimeError("Triton frozen-loss backend is unavailable for these tensors")
+    flat_hidden = hidden.flatten(0, -2).contiguous()
+    flat_targets = targets.reshape(-1).contiguous()
+    token_count = flat_targets.numel()
+    loss_rows = torch.empty(token_count, device=hidden.device, dtype=torch.float32)
+    n = weight.shape[0]
+    if n >= 4096:
+        block_n = 4096
+    else:
+        block_n = 1024
+        while block_n < n:
+            block_n *= 2
+    for start in range(0, token_count, chunk_size):
+        end = min(start + chunk_size, token_count)
+        part = flat_hidden[start:end]
+        compute_part = part if part.dtype == weight.dtype else part.to(weight.dtype)
+        logits = F.linear(compute_part, weight)
+        _fused_ce_loss_kernel_online[(end - start,)](
+            logits,
+            flat_targets[start:end],
+            loss_rows[start:end],
+            logits.stride(0),
+            logits.stride(1),
+            n,
+            block_n,
+            float(token_count),
+            num_warps=8 if block_n >= 2048 else 4,
+        )
+    return loss_rows.sum()
+
+
+def _triton_frozen_head_forward(
+    hidden: torch.Tensor,
+    weight: torch.Tensor,
+    targets: torch.Tensor,
+    chunk_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Dispatch the qualified shape to split storage; preserve all fallbacks."""
+
+    from molt_stream.kernels.split_frozen_loss import (
+        split_frozen_head_forward,
+        split_frozen_head_supported,
+    )
+
+    if split_frozen_head_supported(hidden, weight, targets, chunk_size):
+        return split_frozen_head_forward(hidden, weight, targets, chunk_size)
+    return _separated_triton_frozen_head_forward(hidden, weight, targets, chunk_size)
 
 
 def _validate_inputs(
@@ -245,8 +342,8 @@ def frozen_linear_cross_entropy(
     """Exact cross-entropy and analytical hidden gradient for frozen linear heads.
 
     Tiled over token chunks to avoid allocating complete [tokens, vocabulary]
-    FP32 logits. A fused Triton reduction overwrites each private low-precision
-    chunk with its exact softmax gradient before the hidden-gradient GEMM.
+    FP32 logits. A fused Triton reduction produces a separate low-precision
+    gradient chunk before the hidden-gradient GEMM.
     """
     _validate_inputs(hidden, weight, targets, chunk_size)
 

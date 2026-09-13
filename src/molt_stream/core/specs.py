@@ -8,7 +8,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-
 _ENVIRONMENT_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 
 
@@ -349,13 +348,13 @@ class TrainingSpec:
         ):
             raise ValueError("QLoRA activation compression minimum bytes must be non-negative")
         if not isinstance(self.qlora_fused_optimizer, bool):
-            raise ValueError("qlora_fused_optimizer must be a boolean")
+            raise ValueError("qlora_fused_optimizer must be a boolean")  # noqa: TRY004
         if self.qlora_fused_optimizer and (
             self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
         ):
             raise ValueError("qlora_fused_optimizer requires QLoRA on CUDA")
         if not isinstance(self.qlora_autocast, bool):
-            raise ValueError("qlora_autocast must be a boolean")
+            raise ValueError("qlora_autocast must be a boolean")  # noqa: TRY004
         if self.qlora_autocast and (
             self.mode != TrainingMode.QLORA or self.stream.device != "cuda"
         ):
@@ -401,11 +400,11 @@ class TrainingSpec:
         elif not 0.03 <= self.thermal_pause_seconds <= 0.05:
             raise ValueError("thermal_pause_seconds must be between 0.03 and 0.05")
         if self.thermal_control_mode not in {
-            "reactive", "predictive-cruise", "zone-cruise", "steady-duty", "intercooler", "dual-gear"
+            "reactive", "predictive-cruise", "zone-cruise", "micro-guard", "steady-duty", "intercooler", "dual-gear"
         }:
             raise ValueError(
                 "thermal_control_mode must be reactive, predictive-cruise, zone-cruise, "
-                "steady-duty, intercooler, or dual-gear"
+                "micro-guard, steady-duty, intercooler, or dual-gear"
             )
         if self.thermal_lookahead_seconds <= 0:
             raise ValueError("thermal_lookahead_seconds must be positive")
@@ -442,9 +441,9 @@ class TrainingSpec:
             raise ValueError("power_limit_watts must be positive when provided")
         if self.thermal_power_target_watts is not None and self.thermal_power_target_watts <= 0:
             raise ValueError("thermal_power_target_watts must be positive when provided")
-        if self.thermal_control_mode == "zone-cruise":
+        if self.thermal_control_mode in {"zone-cruise", "micro-guard"}:
             if self.thermal_cruise_max_c is None:
-                raise ValueError("zone-cruise requires thermal_cruise_max_c")
+                raise ValueError(f"{self.thermal_control_mode} requires thermal_cruise_max_c")
             if not self.thermal_target_c < self.thermal_cruise_max_c < self.thermal_abort_c:
                 raise ValueError("thermal zones must satisfy target < cruise max < abort")
             if not 0 <= self.min_pause_ms <= self.max_pause_ms:
@@ -455,6 +454,8 @@ class TrainingSpec:
                 self.thermal_cruise_max_c - self.thermal_target_c
             ):
                 raise ValueError("thermal_protective_hysteresis_c must fit in cruise window")
+            if self.thermal_control_mode == "micro-guard" and self.thermal_protective_pause_ms > 100:
+                raise ValueError("micro-guard protective pause must not exceed 100 ms")
         if self.thermal_control_mode == "steady-duty":
             if self.thermal_cruise_max_c is None:
                 raise ValueError("steady-duty requires thermal_cruise_max_c")
@@ -469,7 +470,7 @@ class TrainingSpec:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "TrainingSpec":
+    def from_dict(cls, value: dict[str, Any]) -> TrainingSpec:
         known_fields = {field.name for field in fields(cls)}
         unknown_fields = sorted(set(value) - known_fields)
         if unknown_fields:
@@ -477,9 +478,9 @@ class TrainingSpec:
                 "unknown training configuration field(s): " + ", ".join(unknown_fields)
             )
         if not isinstance(value.get("qlora_fused_optimizer", False), bool):
-            raise ValueError("qlora_fused_optimizer must be a boolean")
+            raise ValueError("qlora_fused_optimizer must be a boolean")  # noqa: TRY004
         if not isinstance(value.get("qlora_autocast", False), bool):
-            raise ValueError("qlora_autocast must be a boolean")
+            raise ValueError("qlora_autocast must be a boolean")  # noqa: TRY004
         data_value = dict(value["data"])
         data_value["path"] = _expand_config_path(str(data_value["path"]), "data.path")
         if data_value.get("validation_path") is not None:

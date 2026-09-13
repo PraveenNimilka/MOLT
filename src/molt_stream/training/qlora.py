@@ -5,16 +5,17 @@ import json
 import math
 import os
 import random
-import signal
 import shutil
+import signal
 import threading
 import time
 import uuid
 import weakref
-from dataclasses import asdict
+from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import asdict
+from itertools import pairwise
 from pathlib import Path
-from typing import Callable
 
 import torch
 from torch.nn import functional as F
@@ -25,32 +26,35 @@ from molt_stream.core.specs import TrainingSpec
 from molt_stream.data.bytes import MMapTokenBatcher
 from molt_stream.experiments.store import AtomicCheckpointStore, sha256
 from molt_stream.kernels.partitioned_loss import exact_partitioned_linear_cross_entropy
+from molt_stream.measurement.step_windows import step_window_rates
 from molt_stream.measurement.telemetry import (
     NVMLTelemetry,
     integrate_board_energy,
     manage_power_limit,
 )
-from molt_stream.measurement.step_windows import step_window_rates
-from molt_stream.measurement.update_accounting import UpdateAccounting
 from molt_stream.measurement.thermal import (
     build_thermal_controller,
     cooling_pause,
     duty_cycle_pause_seconds,
-    latest_telemetry_point,
     latest_cpu_temperature_c,
+    latest_telemetry_point,
     latest_temperature_c,
     passive_cooldown,
     postrun_thermal_violation,
     wait_for_stable_system_headroom,
     wait_for_thermal_headroom,
 )
-from molt_stream.training.update_transaction import UpdateTransaction
-from molt_stream.training.evaluation_guard import EvaluationThermalStop, guarded_decoder_evaluation
+from molt_stream.measurement.update_accounting import UpdateAccounting
+from molt_stream.training.activation_offload import activation_offload_context
+from molt_stream.training.evaluation_guard import (
+    EvaluationThermalStop,
+    guarded_decoder_evaluation,
+)
 from molt_stream.training.layer_thermal_guard import (
     TrainingThermalStop,
     guarded_decoder_training,
 )
-from molt_stream.training.activation_offload import activation_offload_context
+from molt_stream.training.update_transaction import UpdateTransaction
 
 _FROZEN_HEAD_COMPUTE_CACHE = "_molt_frozen_head_bf16"
 
@@ -94,7 +98,9 @@ class _InterruptLatch:
 
 def _activation_storage_context(spec: TrainingSpec):
     if spec.qlora_activation_compression_bits == 4:
-        from molt_stream.methods.activation_compression import CompressedSavedActivations
+        from molt_stream.methods.activation_compression import (
+            CompressedSavedActivations,
+        )
 
         return CompressedSavedActivations(
             minimum_bytes=spec.qlora_activation_compression_minimum_bytes
@@ -126,6 +132,7 @@ def _shifted_causal_loss(
     precompute_head_gradient: bool = False,
     loss_backend: str = "analytical",
     sdpa_kernel_name: str = "auto",
+    cuda_region_marker: Callable[[str], None] | None = None,
 ) -> torch.Tensor:
     """Compute loss against MOLT's already shifted targets exactly once."""
     with _sdpa_kernel_context(sdpa_kernel_name), torch.autocast(
@@ -147,6 +154,8 @@ def _shifted_causal_loss(
                     "bias-free Linear head"
                 )
             hidden = base.model(input_ids=inputs, use_cache=False, return_dict=True).last_hidden_state
+            if cuda_region_marker is not None:
+                cuda_region_marker("transformer_end")
             projection_weight = (
                 getattr(model, _FROZEN_HEAD_COMPUTE_CACHE)
                 if precompute_head_gradient
@@ -177,7 +186,8 @@ def _local_checkpoint_parameter_count(base_model: str | None) -> int | None:
         total = 0
         for path in sorted(root.glob("*.safetensors")):
             with safe_open(path, framework="pt", device="cpu") as handle:
-                for key in handle.keys():
+                # ``safe_open`` exposes keys() but is not itself iterable.
+                for key in handle.keys():  # noqa: SIM118
                     total += math.prod(handle.get_slice(key).get_shape())
         return total or None
     except (ImportError, OSError, RuntimeError, ValueError):
@@ -375,13 +385,18 @@ def _build_qlora_model(
 
         enable_frozen_rmsnorm_bf16(model)
     if spec.qlora_checkpoint_stride != 1:
-        from molt_stream.training.selective_checkpoint import configure_checkpoint_stride
+        from molt_stream.training.selective_checkpoint import (
+            configure_checkpoint_stride,
+        )
 
         configure_checkpoint_stride(model, spec.qlora_checkpoint_stride)
     lora_kwargs: dict[str, object] = {}
     target_modules = _resolve_lora_target_modules(spec.stream.lora_target_modules)
     if spec.qlora_train_last_layers is not None and spec.qlora_full_warmup_steps == 0:
-        from molt_stream.training.truncated_backprop import QWEN2_LINEAR_MODULES, upper_layer_indices
+        from molt_stream.training.truncated_backprop import (
+            QWEN2_LINEAR_MODULES,
+            upper_layer_indices,
+        )
 
         if getattr(model.config, "model_type", None) != "qwen2":
             raise CapabilityError("Upper-layer QLoRA currently requires Qwen2")
@@ -433,7 +448,9 @@ def _build_qlora_model(
 
         enable_bf16_lora_shadows(model)
     if spec.qlora_train_last_layers is not None and spec.qlora_full_warmup_steps == 0:
-        from molt_stream.training.truncated_backprop import truncate_before_decoder_layer
+        from molt_stream.training.truncated_backprop import (
+            truncate_before_decoder_layer,
+        )
 
         truncate_before_decoder_layer(
             model, int(model.config.num_hidden_layers) - spec.qlora_train_last_layers
@@ -638,11 +655,17 @@ def train_qlora(
     )
     if (spec.qlora_train_last_layers is not None
             and step >= spec.qlora_full_warmup_steps and not upper_layers_activated):
-        from molt_stream.training.truncated_backprop import activate_upper_layer_training
+        from molt_stream.training.truncated_backprop import (
+            activate_upper_layer_training,
+        )
         activate_upper_layer_training(model, spec.qlora_train_last_layers)
         upper_layers_activated = True
 
     thermal_pause_seconds = startup_cooling_seconds
+    thermal_guard_pause_seconds = 0.0
+    thermal_regulator_pause_seconds = 0.0
+    thermal_recovery_pause_seconds = 0.0
+    thermal_intra_step_pause_seconds = 0.0
     thermal_stop_reason: str | None = None
     microbatch_peak_temperature: float | None = None
     loss_sum = 0.0
@@ -670,6 +693,7 @@ def train_qlora(
     def recover_thermal() -> bool:
         nonlocal recovery_count, recovery_checkpoint_seconds
         nonlocal thermal_pause_seconds, thermal_stop_reason
+        nonlocal thermal_recovery_pause_seconds
         if (spec.thermal_recovery_mode != "cool-and-continue"
                 or recovery_count >= spec.thermal_max_recoveries):
             return False
@@ -688,11 +712,13 @@ def train_qlora(
         )
         recovery_count += 1
         thermal_pause_seconds += decision.pause_seconds
+        thermal_recovery_pause_seconds += decision.pause_seconds
         thermal_stop_reason = decision.stop_reason
         return decision.stop_reason is None
 
     def microbatch_gate() -> bool:
         nonlocal thermal_pause_seconds, thermal_stop_reason
+        nonlocal thermal_guard_pause_seconds
         guard_c = spec.thermal_microbatch_guard_c or spec.thermal_target_c
         decision = wait_for_thermal_headroom(
             fresh_temperature, target_c=guard_c, abort_c=spec.thermal_abort_c,
@@ -704,17 +730,19 @@ def train_qlora(
             ))) if progress else None,
         )
         thermal_pause_seconds += decision.pause_seconds
+        thermal_guard_pause_seconds += decision.pause_seconds
         thermal_stop_reason = decision.stop_reason
         return decision.stop_reason is None
 
     def intra_step_checkpoint() -> bool:
-        nonlocal thermal_pause_seconds
+        nonlocal thermal_intra_step_pause_seconds, thermal_pause_seconds
         if not microbatch_gate():
             return False
         pause = spec.qlora_intra_step_pause_ms / 1000.0
         if pause:
             time.sleep(pause)
             thermal_pause_seconds += pause
+            thermal_intra_step_pause_seconds += pause
         return True
 
     @torch.no_grad()
@@ -792,7 +820,9 @@ def train_qlora(
             break
         if (spec.qlora_train_last_layers is not None
                 and step >= spec.qlora_full_warmup_steps and not upper_layers_activated):
-            from molt_stream.training.truncated_backprop import activate_upper_layer_training
+            from molt_stream.training.truncated_backprop import (
+                activate_upper_layer_training,
+            )
             activate_upper_layer_training(model, spec.qlora_train_last_layers)
             upper_layers_activated = True
         step_started = time.perf_counter()
@@ -1000,15 +1030,22 @@ def train_qlora(
             thermal_abort = True
             break
         if pause:
-            def notify_cooling(remaining: float, current: float | None) -> None:
+            def notify_cooling(
+                remaining: float,
+                current: float | None,
+                *,
+                event_step: int = step,
+                event_tokens: int = tokens,
+                event_loss: float = loss_sum,
+            ) -> None:
                 if progress:
                     progress(ProgressEvent(
                         "step",
-                        step=step,
+                        step=event_step,
                         total_steps=spec.max_steps,
                         elapsed_seconds=time.perf_counter() - training_started,
-                        tokens_per_second=(tokens - initial_tokens) / max(1e-6, time.perf_counter() - training_started),
-                        loss=loss_sum,
+                        tokens_per_second=(event_tokens - initial_tokens) / max(1e-6, time.perf_counter() - training_started),
+                        loss=event_loss,
                         gpu_temperature_c=current,
                         cpu_temperature_c=latest_cpu_temperature_c(telemetry.points),
                         vram_bytes=int(torch.cuda.memory_allocated()),
@@ -1017,13 +1054,15 @@ def train_qlora(
                         initial_step=initial_step,
                     ))
 
-            thermal_pause_seconds += cooling_pause(
+            regulator_pause = cooling_pause(
                 pause,
                 lambda: latest_temperature_c(telemetry.points),
                 recovery_c=spec.thermal_cruise_max_c if spec.thermal_cruise_max_c is not None else 60.0,
                 abort_c=spec.thermal_abort_c,
                 notify=notify_cooling if progress else None,
             )
+            thermal_pause_seconds += regulator_pause
+            thermal_regulator_pause_seconds += regulator_pause
             temperature = latest_temperature_c(telemetry.points)
             if temperature is not None and temperature >= spec.thermal_abort_c:
                 thermal_abort = True
@@ -1139,7 +1178,7 @@ def train_qlora(
             ),
             "perplexity_monotonic": all(
                 right["perplexity"] <= left["perplexity"]
-                for left, right in zip(evaluations, evaluations[1:])
+                for left, right in pairwise(evaluations)
             ) if len(evaluations) >= 2 else None,
             "setup_seconds": setup_seconds,
             "startup_cooling_seconds": startup_cooling_seconds,
@@ -1249,6 +1288,11 @@ def train_qlora(
             "postrun_thermal_violation": delayed_thermal_violation,
             "discarded_uncommitted_tokens": discarded_tokens,
             "thermal_pause_seconds": thermal_pause_seconds,
+            "thermal_startup_pause_seconds": startup_cooling_seconds,
+            "thermal_guard_pause_seconds": thermal_guard_pause_seconds,
+            "thermal_regulator_pause_seconds": thermal_regulator_pause_seconds,
+            "thermal_recovery_pause_seconds": thermal_recovery_pause_seconds,
+            "thermal_intra_step_pause_seconds": thermal_intra_step_pause_seconds,
             "thermal_microbatch_guard_c": (
                 spec.thermal_microbatch_guard_c or spec.thermal_target_c
             ),

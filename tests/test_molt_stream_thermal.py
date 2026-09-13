@@ -1,14 +1,48 @@
 import pytest
 
+from molt_stream.core.contracts import TelemetryPoint
+from molt_stream.core.specs import (
+    DataSpec,
+    ModelSpec,
+    StreamSpec,
+    TrainingMode,
+    TrainingSpec,
+)
 from molt_stream.measurement.thermal import (
-    ThermalCruiseController,
+    HeatSoakGuardEnvelope,
+    MicroPauseThermalController,
     SteadyDutyThermalController,
+    ThermalCruiseController,
     ZonedThermalController,
     duty_cycle_pause_seconds,
     latest_temperature_c,
 )
-from molt_stream.core.contracts import TelemetryPoint
-from molt_stream.core.specs import DataSpec, ModelSpec, StreamSpec, TrainingMode, TrainingSpec
+
+
+def test_heat_soak_guard_envelope_switches_once_without_model_assumptions():
+    envelope = HeatSoakGuardEnvelope(
+        heat_soak_c=75.0,
+        steady_c=76.0,
+        heat_soak_seconds=150.0,
+        abort_c=84.0,
+    )
+    assert envelope.target_c(0.0) == 75.0
+    assert envelope.target_c(149.999) == 75.0
+    assert envelope.target_c(150.0) == 76.0
+    assert envelope.target_c(10_000.0) == 76.0
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        (76.0, 75.0, 150.0, 84.0),
+        (75.0, 76.0, 0.0, 84.0),
+        (75.0, 84.0, 150.0, 84.0),
+    ],
+)
+def test_heat_soak_guard_envelope_rejects_invalid_boundaries(values):
+    with pytest.raises(ValueError):
+        HeatSoakGuardEnvelope(*values)
 
 
 def point(
@@ -167,6 +201,41 @@ def test_zone_cruise_protects_above_ceiling_and_aborts_at_boundary():
     assert released.phase == "cooling"
     assert abort.phase == "thermal-abort"
     assert abort.abort and abort.pause_seconds == 0.0
+
+
+def test_micro_pause_bands_and_abort_are_bounded():
+    controller = MicroPauseThermalController()
+    assert controller.update(point(77, 1), step_seconds=.13).pause_seconds == 0
+    assert controller.update(point(78, 2), step_seconds=.13).pause_seconds == pytest.approx(.001)
+    assert controller.update(point(79, 3), step_seconds=.13).pause_seconds == pytest.approx(.006)
+    assert controller.update(point(80, 4), step_seconds=.13).pause_seconds == pytest.approx(.012)
+    protective = controller.update(point(82, 5), step_seconds=.13)
+    assert protective.pause_seconds == pytest.approx(.100)
+    assert controller.update(point(84, 6), step_seconds=.13).abort
+
+
+def test_micro_pause_latch_requires_three_distinct_cool_samples():
+    controller = MicroPauseThermalController()
+    controller.update(point(82, 1), step_seconds=.13)
+    for timestamp in (2, 2, 3):
+        assert controller.update(point(80, timestamp), step_seconds=.13).phase == "protective-micro-pause"
+    assert controller.update(point(80, 4), step_seconds=.13).phase == "micro-pause-high"
+
+
+def test_micro_pause_missing_telemetry_is_protective():
+    decision = MicroPauseThermalController().update(None, step_seconds=.13)
+    assert decision.phase == "telemetry-protective"
+    assert decision.pause_seconds == pytest.approx(.100)
+
+
+def test_micro_pause_computes_bounded_power_budget_delay():
+    controller = MicroPauseThermalController()
+    decision = controller.update(point(72, 1, 72), step_seconds=.12)
+    expected = .12 * (72 - 48) / (48 - 12)
+    assert decision.phase == "power-budget-micro-pause"
+    assert decision.pause_seconds == pytest.approx(expected)
+    bounded = controller.update(point(72, 2, 140), step_seconds=.12)
+    assert bounded.pause_seconds == pytest.approx(.100)
 
 
 def test_steady_duty_paces_from_start_and_latches_protection():

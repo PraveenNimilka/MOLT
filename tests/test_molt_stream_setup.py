@@ -115,7 +115,7 @@ def test_global_installer_plan_is_scoped_and_non_mutating(tmp_path, action):
             "-Action",
             action,
             "-Version",
-            "0.11.0a9",
+            "0.12.0",
             "-Plan",
         ],
         env=env,

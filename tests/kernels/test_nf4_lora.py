@@ -4,29 +4,30 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from molt_stream.methods.nf4_lora import enable_scheduled_nf4_lora, scheduled_nf4_lora
 from molt_stream.methods.nf4_backward import (
     packed_nf4_backward_input,
     packed_nf4_lora_backward_input,
 )
+from molt_stream.methods.nf4_lora import enable_scheduled_nf4_lora, scheduled_nf4_lora
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-def test_scheduled_nf4_lora_matches_peft_dataflow() -> None:
+@pytest.mark.parametrize("width,out_width", [(64, 96), (1536, 256), (1536, 1536), (1536, 8960), (8960, 1536)])
+@pytest.mark.parametrize("scale", [0.125, 0.3, 2.0])
+def test_scheduled_nf4_lora_matches_peft_dataflow(width: int, out_width: int, scale: float) -> None:
     import bitsandbytes as bnb
 
     torch.manual_seed(941)
-    x_left = torch.randn(2, 17, 64, device="cuda", dtype=torch.bfloat16).requires_grad_()
+    x_left = torch.randn(1, 256, width, device="cuda", dtype=torch.bfloat16).requires_grad_()
     x_right = x_left.detach().clone().requires_grad_()
-    dense_weight = torch.randn(96, 64, device="cuda", dtype=torch.bfloat16)
+    dense_weight = torch.randn(out_width, width, device="cuda", dtype=torch.bfloat16)
     packed, quant_state = bnb.functional.quantize_4bit(
         dense_weight, blocksize=64, compress_statistics=True, quant_type="nf4"
     )
-    a_left = torch.randn(8, 64, device="cuda", dtype=torch.float32).requires_grad_()
-    b_left = torch.randn(96, 8, device="cuda", dtype=torch.float32).requires_grad_()
+    a_left = torch.randn(8, width, device="cuda", dtype=torch.float32).requires_grad_()
+    b_left = torch.randn(out_width, 8, device="cuda", dtype=torch.float32).requires_grad_()
     a_right = a_left.detach().clone().requires_grad_()
     b_right = b_left.detach().clone().requires_grad_()
-    scale = 0.125
 
     with torch.autocast("cuda", dtype=torch.bfloat16):
         expected = bnb.matmul_4bit(x_left, packed, quant_state=quant_state)
@@ -42,6 +43,40 @@ def test_scheduled_nf4_lora_matches_peft_dataflow() -> None:
     assert torch.allclose(x_right.grad, x_left.grad, rtol=4e-3, atol=4e-3)
     assert torch.allclose(a_right.grad, a_left.grad, rtol=4e-3, atol=4e-3)
     assert torch.allclose(b_right.grad, b_left.grad, rtol=4e-3, atol=4e-3)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_cached_backward_weight_is_bitwise_equal_to_per_call_decode() -> None:
+    import bitsandbytes as bnb
+
+    torch.manual_seed(944)
+    dense_weight = torch.randn(1536, 1536, device="cuda", dtype=torch.bfloat16)
+    packed, quant_state = bnb.functional.quantize_4bit(
+        dense_weight, blocksize=64, compress_statistics=True, quant_type="nf4"
+    )
+    decoded = bnb.functional.dequantize_4bit(packed, quant_state=quant_state).to(
+        torch.bfloat16
+    )
+    x_left = torch.randn(1, 256, 1536, device="cuda", dtype=torch.bfloat16).requires_grad_()
+    x_right = x_left.detach().clone().requires_grad_()
+    a_left = torch.randn(8, 1536, device="cuda", dtype=torch.float32).requires_grad_()
+    b_left = torch.randn(1536, 8, device="cuda", dtype=torch.float32).requires_grad_()
+    a_right = a_left.detach().clone().requires_grad_()
+    b_right = b_left.detach().clone().requires_grad_()
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        left = scheduled_nf4_lora(
+            x_left, packed, a_left, b_left, quant_state, 2.0
+        )
+        right = scheduled_nf4_lora(
+            x_right, packed, a_right, b_right, quant_state, 2.0, decoded
+        )
+    upstream = torch.randn_like(left)
+    left.backward(upstream)
+    right.backward(upstream)
+    assert torch.equal(right, left)
+    assert torch.equal(x_right.grad, x_left.grad)
+    assert torch.equal(a_right.grad, a_left.grad)
+    assert torch.equal(b_right.grad, b_left.grad)
 
 
 def test_scheduled_nf4_lora_refuses_cpu() -> None:

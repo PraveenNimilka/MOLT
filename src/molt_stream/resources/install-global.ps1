@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$releaseVersion = '0.11.0a9'
+$releaseVersion = '0.12.0'
 $runtimeHome = if ($env:MOLT_HOME) {
     [IO.Path]::GetFullPath($env:MOLT_HOME)
 } else {

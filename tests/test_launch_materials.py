@@ -54,16 +54,16 @@ def test_launch_pages_use_consistent_license_and_version() -> None:
     for text in (readme, announcement, quickstart):
         assert "source-available" in text.lower()
         assert "PolyForm Shield 1.0.0" in text
-    assert "0.11.0a9" in readme
+    assert "0.12.0" in readme
     assert "install-global.ps1" in readme
-    assert "0.11.0a9" in quickstart
+    assert "0.12.0" in quickstart
 
 
 def test_public_installer_hash_matches_documented_bootstrap() -> None:
     installer = ROOT / "install-global.ps1"
     canonical = installer.read_bytes().replace(b"\r\n", b"\n")
     digest = hashlib.sha256(canonical).hexdigest()
-    assert digest == "9597912ea5443ac8773d9959d3ad1acc0d32513d254c2a796875455f8e8d2798"
+    assert digest == "75f7de635562447f4246a78634db56b4d11b4664b4c868036d3da1a8ffdeb7f5"
     for path in (
         ROOT / "README.md",
         ROOT / "docs" / "INSTALL.md",

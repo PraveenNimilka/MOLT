@@ -24,6 +24,21 @@ PROFILES: dict[str, dict[str, Any]] = {
         "thermal_pause_seconds": 0.05,
         "thermal_abort_c": 85.0,
     },
+    "micro": {
+        "name": "MICRO",
+        "description": "Experimental power-aware governor: bounded 1-100ms pacing; 84°C abort",
+        "thermal_control_mode": "micro-guard",
+        "thermal_target_c": 78.0,
+        "thermal_cruise_max_c": 82.0,
+        "thermal_microbatch_guard_c": 83.0,
+        "thermal_pause_seconds": 0.04,
+        "thermal_abort_c": 84.0,
+        "thermal_power_target_watts": 48.0,
+        "min_pause_ms": 1.0,
+        "max_pause_ms": 12.0,
+        "thermal_protective_pause_ms": 100.0,
+        "thermal_protective_hysteresis_c": 2.0,
+    },
     "balanced": {
         "name": "BALANCED",
         "description": "Balanced pacing: begins at 74°C; abort boundary 85°C",
@@ -72,4 +87,16 @@ def apply_profile(spec: TrainingSpec, profile_name: str) -> TrainingSpec:
         thermal_cruise_max_c=prof["thermal_cruise_max_c"],
         thermal_pause_seconds=prof["thermal_pause_seconds"],
         thermal_abort_c=prof["thermal_abort_c"],
+        thermal_power_target_watts=prof.get(
+            "thermal_power_target_watts", spec.thermal_power_target_watts
+        ),
+        thermal_microbatch_guard_c=prof.get("thermal_microbatch_guard_c", spec.thermal_microbatch_guard_c),
+        min_pause_ms=prof.get("min_pause_ms", spec.min_pause_ms),
+        max_pause_ms=prof.get("max_pause_ms", spec.max_pause_ms),
+        thermal_protective_pause_ms=prof.get(
+            "thermal_protective_pause_ms", spec.thermal_protective_pause_ms
+        ),
+        thermal_protective_hysteresis_c=prof.get(
+            "thermal_protective_hysteresis_c", spec.thermal_protective_hysteresis_c
+        ),
     )

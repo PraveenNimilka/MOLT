@@ -1,7 +1,8 @@
 """Tests for modernized MOLT CLI, workspace discovery, and profiles."""
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
 import pytest
 
 from molt_stream import cli as cli_module
@@ -11,10 +12,13 @@ from molt_stream.core.discovery import (
     find_models,
     find_runs,
     get_hardware_info,
-    init_workspace,
 )
-from molt_stream.core.profiles import PROFILES, apply_profile, get_profile
+from molt_stream.core.profiles import apply_profile, get_profile
 from molt_stream.core.specs import load_spec
+from molt_stream.measurement.thermal import (
+    MicroPauseThermalController,
+    build_thermal_controller,
+)
 
 
 def test_cuda_repair_uses_uv_when_project_venv_has_no_pip(monkeypatch):
@@ -66,7 +70,7 @@ def test_workspace_discovery_finds_assets(tmp_path: Path):
 
 
 def test_profile_mappings_and_application():
-    for name in ("speed", "balanced", "cool", "energy"):
+    for name in ("speed", "balanced", "cool", "energy", "micro"):
         prof = get_profile(name)
         assert "thermal_target_c" in prof
         assert "thermal_pause_seconds" in prof
@@ -82,6 +86,18 @@ def test_profile_mappings_and_application():
     speed_spec = apply_profile(spec, "speed")
     assert speed_spec.thermal_target_c == 82.0
     assert speed_spec.thermal_pause_seconds == 0.05
+    micro_spec = apply_profile(spec, "micro")
+    assert micro_spec.thermal_control_mode == "micro-guard"
+    assert micro_spec.thermal_microbatch_guard_c == 83.0
+    assert micro_spec.thermal_target_c == 78.0
+    assert micro_spec.thermal_cruise_max_c == 82.0
+    assert micro_spec.min_pause_ms == 1.0
+    assert micro_spec.thermal_power_target_watts == 48.0
+    micro_controller = build_thermal_controller(micro_spec)
+    assert isinstance(micro_controller, MicroPauseThermalController)
+    assert micro_controller.power_control_start_c == 65.0
+    assert micro_controller.target_average_watts == 48.0
+    assert micro_controller.pauses[-1] == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize("output_mode", ["--json", "--ui"])

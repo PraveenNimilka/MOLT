@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import time
 import math
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -26,6 +26,42 @@ class SystemStartupThermalDecision:
     cpu_temperature_c: float | None
     cpu_sensor_available: bool
     stop_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class HeatSoakGuardEnvelope:
+    """Use a stricter guard only while the cooling assembly heat-soaks.
+
+    The envelope changes host-side launch timing, never CUDA work. Its time
+    boundary is measured from the start of training, so it is independent of
+    model architecture, layer count, update count, and dataset shape.
+    """
+
+    heat_soak_c: float
+    steady_c: float
+    heat_soak_seconds: float
+    abort_c: float
+
+    def __post_init__(self) -> None:
+        if not (
+            math.isfinite(self.heat_soak_c)
+            and math.isfinite(self.steady_c)
+            and math.isfinite(self.abort_c)
+            and 0 < self.heat_soak_c <= self.steady_c < self.abort_c
+        ):
+            raise ValueError(
+                "heat-soak guard temperatures must satisfy "
+                "0 < heat_soak <= steady < abort"
+            )
+        if not math.isfinite(self.heat_soak_seconds) or self.heat_soak_seconds <= 0:
+            raise ValueError("heat_soak_seconds must be positive and finite")
+
+    def target_c(self, elapsed_training_seconds: float) -> float:
+        if not math.isfinite(elapsed_training_seconds) or elapsed_training_seconds < 0:
+            raise ValueError("elapsed training time must be finite and non-negative")
+        if elapsed_training_seconds < self.heat_soak_seconds:
+            return self.heat_soak_c
+        return self.steady_c
 
 
 def wait_for_stable_system_headroom(
@@ -392,6 +428,104 @@ class ZonedThermalController:
         )
 
 
+class MicroPauseThermalController:
+    """Small post-update delays with a protective hysteresis latch.
+
+    Below ``start_c`` this controller is inert. Whole-degree NVML temperature
+    samples select one of three bounded delay bands. The hot band is latched
+    until three distinct cool samples arrive, preventing one cooler sample from
+    immediately releasing protection. It never changes CUDA work or gradients.
+    """
+
+    def __init__(
+        self,
+        *,
+        start_c: float = 78.0,
+        protective_c: float = 82.0,
+        abort_c: float = 84.0,
+        low_pause_seconds: float = 0.001,
+        middle_pause_seconds: float = 0.006,
+        high_pause_seconds: float = 0.012,
+        protective_pause_seconds: float = 0.100,
+        release_c: float = 80.0,
+        release_samples: int = 3,
+        power_control_start_c: float = 65.0,
+        target_average_watts: float = 48.0,
+        idle_watts: float = 12.0,
+    ) -> None:
+        if not 0 < start_c < release_c < protective_c < abort_c:
+            raise ValueError("micro-pause temperatures must satisfy start < release < protective < abort")
+        pauses = (low_pause_seconds, middle_pause_seconds, high_pause_seconds,
+                  protective_pause_seconds)
+        if not (0 <= pauses[0] <= pauses[1] <= pauses[2] <= pauses[3] <= 0.100):
+            raise ValueError("micro-pauses must be ordered and no greater than 100 ms")
+        if type(release_samples) is not int or release_samples < 1:
+            raise ValueError("release_samples must be a positive integer")
+        if not 0 < power_control_start_c < start_c:
+            raise ValueError("power control must begin below the temperature pause bands")
+        if not 0 <= idle_watts < target_average_watts:
+            raise ValueError("idle watts must be below target average watts")
+        self.start_c, self.protective_c, self.abort_c = start_c, protective_c, abort_c
+        self.release_c, self.release_samples = release_c, release_samples
+        self.pauses = pauses
+        self.power_control_start_c = power_control_start_c
+        self.target_average_watts = target_average_watts
+        self.idle_watts = idle_watts
+        self._latched = False
+        self._cool_samples = 0
+        self._last_sample_time: float | None = None
+
+    def update(self, point: TelemetryPoint | None, *, step_seconds: float) -> ThermalDecision:
+        if step_seconds <= 0:
+            raise ValueError("step_seconds must be positive")
+        if point is None or point.gpu_temperature_c is None:
+            return ThermalDecision(self.pauses[-1], None, None, 0.0, None, False,
+                                   "telemetry-protective")
+        temperature = float(point.gpu_temperature_c)
+        if not math.isfinite(temperature):
+            return ThermalDecision(self.pauses[-1], temperature, None, 0.0, None, False,
+                                   "telemetry-protective")
+        if temperature >= self.abort_c:
+            return ThermalDecision(0.0, temperature, temperature, 0.0, temperature, True,
+                                   "thermal-abort")
+        is_new_sample = self._last_sample_time != point.monotonic_seconds
+        self._last_sample_time = point.monotonic_seconds
+        if temperature >= self.protective_c:
+            self._latched, self._cool_samples = True, 0
+        elif self._latched:
+            if is_new_sample and temperature <= self.release_c:
+                self._cool_samples += 1
+                if self._cool_samples >= self.release_samples:
+                    self._latched, self._cool_samples = False, 0
+            elif is_new_sample:
+                self._cool_samples = 0
+        if self._latched:
+            return ThermalDecision(self.pauses[-1], temperature, temperature, 0.0, temperature,
+                                   False, "protective-micro-pause")
+        band = int(temperature - self.start_c)
+        if band < 0:
+            pause, phase = 0.0, "full-speed"
+        elif band == 0:
+            pause, phase = self.pauses[0], "micro-pause-low"
+        elif band == 1:
+            pause, phase = self.pauses[1], "micro-pause-middle"
+        else:
+            pause, phase = self.pauses[2], "micro-pause-high"
+        power = point.gpu_power_watts
+        if temperature >= self.power_control_start_c and power is not None and math.isfinite(power):
+            # Solve (P_active*t_step + P_idle*t_pause)/(t_step+t_pause) = P_target.
+            # This bounds average board power without changing any CUDA operation.
+            power_pause = step_seconds * max(
+                0.0,
+                (float(power) - self.target_average_watts)
+                / (self.target_average_watts - self.idle_watts),
+            )
+            power_pause = min(power_pause, self.pauses[-1])
+            if power_pause > pause:
+                pause, phase = power_pause, "power-budget-micro-pause"
+        return ThermalDecision(pause, temperature, temperature, 0.0, temperature, False, phase)
+
+
 class SteadyDutyThermalController:
     """Constant proactive pacing with a hotter protective recovery latch."""
 
@@ -694,7 +828,7 @@ class ThermalCruiseController:
 
 def build_thermal_controller(
     spec: TrainingSpec,
-) -> ThermalCruiseController | ZonedThermalController | SteadyDutyThermalController | DualGearThermalController | None:
+) -> ThermalCruiseController | ZonedThermalController | MicroPauseThermalController | SteadyDutyThermalController | DualGearThermalController | None:
     """Build the explicitly configured controller without hidden fallback."""
     if spec.thermal_control_mode in ("dual-gear", "intercooler"):
         return DualGearThermalController(
@@ -725,6 +859,23 @@ def build_thermal_controller(
             maximum_pause_seconds=spec.max_pause_ms / 1000.0,
             protective_pause_seconds=spec.thermal_protective_pause_ms / 1000.0,
             protective_hysteresis_c=spec.thermal_protective_hysteresis_c,
+        )
+    if spec.thermal_control_mode == "micro-guard":
+        if spec.thermal_cruise_max_c is None:
+            raise ValueError("micro-guard requires thermal_cruise_max_c")
+        target_average_watts = spec.thermal_power_target_watts or 48.0
+        return MicroPauseThermalController(
+            start_c=spec.thermal_target_c,
+            protective_c=spec.thermal_cruise_max_c,
+            abort_c=spec.thermal_abort_c,
+            low_pause_seconds=spec.min_pause_ms / 1000.0,
+            middle_pause_seconds=(spec.min_pause_ms + spec.max_pause_ms) / 2000.0,
+            high_pause_seconds=spec.max_pause_ms / 1000.0,
+            protective_pause_seconds=spec.thermal_protective_pause_ms / 1000.0,
+            release_c=spec.thermal_cruise_max_c - spec.thermal_protective_hysteresis_c,
+            power_control_start_c=max(1.0, spec.thermal_target_c - 13.0),
+            target_average_watts=target_average_watts,
+            idle_watts=min(12.0, target_average_watts / 2.0),
         )
     if spec.thermal_control_mode == "steady-duty":
         if spec.thermal_cruise_max_c is None:

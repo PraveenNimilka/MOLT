@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import torch
 
 from molt_stream.core.errors import CapabilityError
+from molt_stream.measurement.update_regions import CapturedCudaRegionTimer
 
 
 def require_static_training_model(model: torch.nn.Module) -> None:
@@ -61,6 +62,80 @@ def summarize_cuda_memory_pools(
     return result
 
 
+def cuda_allocation_peak_ledger(snapshot: dict[str, object]) -> dict[str, object]:
+    """Reconstruct allocations live at the recorded allocator high-water mark.
+
+    Memory history may begin after long-lived model tensors were allocated, so
+    this deliberately reports the incremental allocations visible in the trace.
+    It is a diagnostic for capture planning, not a replacement for CUDA''s peak
+    allocator counters.
+    """
+
+    traces = snapshot.get("device_traces", [])
+    events = traces[0] if isinstance(traces, list) and traces else []
+    live: dict[int, dict[str, object]] = {}
+    peak_bytes = 0
+    peak_index = -1
+    current_bytes = 0
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            continue
+        action = event.get("action")
+        address = int(event.get("addr", 0))
+        size = int(event.get("size", 0))
+        if action == "alloc":
+            previous = live.get(address)
+            if previous is not None:
+                current_bytes -= int(previous.get("size", 0))
+            live[address] = event
+            current_bytes += size
+            if current_bytes > peak_bytes:
+                peak_bytes = current_bytes
+                peak_index = index
+        elif action == "free_requested":
+            previous = live.pop(address, None)
+            if previous is not None:
+                current_bytes -= int(previous.get("size", 0))
+
+    live.clear()
+    for event in events[: peak_index + 1]:
+        if not isinstance(event, dict):
+            continue
+        address = int(event.get("addr", 0))
+        if event.get("action") == "alloc":
+            live[address] = event
+        elif event.get("action") == "free_requested":
+            live.pop(address, None)
+
+    groups: dict[str, dict[str, int]] = {}
+    for event in live.values():
+        frames = event.get("frames", [])
+        if isinstance(frames, list) and frames and isinstance(frames[0], dict):
+            frame = frames[0]
+            origin = (
+                f"{frame.get('filename', '<unknown>')}:{frame.get('line', 0)}:"
+                f"{frame.get('name', '<unknown>')}"
+            )
+        else:
+            origin = "<unattributed>"
+        group = groups.setdefault(origin, {"bytes": 0, "allocations": 0})
+        group["bytes"] += int(event.get("size", 0))
+        group["allocations"] += 1
+
+    ranked = sorted(
+        ({"origin": origin, **values} for origin, values in groups.items()),
+        key=lambda row: row["bytes"],
+        reverse=True,
+    )
+    return {
+        "incremental_peak_bytes": peak_bytes,
+        "live_allocations_at_peak": len(live),
+        "peak_trace_index": peak_index,
+        "groups": ranked,
+        "scope": "allocations recorded after memory-history activation",
+    }
+
+
 class StaticCudaMicrobatch:
     """Captured forward/backward for one fixed-shape deterministic microbatch.
 
@@ -77,6 +152,8 @@ class StaticCudaMicrobatch:
         *,
         warmup_steps: int = 3,
         joint_forward_backward: bool = False,
+        region_timer: CapturedCudaRegionTimer | None = None,
+        trim_unused_default_pool: bool = False,
     ) -> None:
         if not torch.cuda.is_available():
             raise CapabilityError("static microbatch execution requires CUDA")
@@ -104,6 +181,7 @@ class StaticCudaMicrobatch:
         )
         self._parameters = unique_parameters
         self._device = device
+        self._region_timer = region_timer
 
         current = torch.cuda.current_stream(device)
         warmup_stream = torch.cuda.Stream(device=device)
@@ -125,8 +203,14 @@ class StaticCudaMicrobatch:
         if joint_forward_backward:
             self._joint_graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(self._joint_graph):
+                if self._region_timer is not None:
+                    self._region_timer.record("graph_start")
                 self._loss = self._build_loss()
+                if self._region_timer is not None:
+                    self._region_timer.record("forward_end")
                 self._loss.backward()
+                if self._region_timer is not None:
+                    self._region_timer.record("graph_end")
         else:
             self._forward_graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(self._forward_graph):
@@ -137,6 +221,9 @@ class StaticCudaMicrobatch:
             ):
                 self._loss.backward(retain_graph=True)
         self.zero_grad()
+        if trim_unused_default_pool:
+            current.synchronize()
+            torch.cuda.empty_cache()
 
     def _build_loss(self) -> torch.Tensor:
         loss = self._loss_builder(*self._inputs)
@@ -165,6 +252,13 @@ class StaticCudaMicrobatch:
         if self._forward_graph is None:
             raise RuntimeError("joint graph does not expose forward-only replay")
 
+        self.stage_inputs(*inputs)
+        self._forward_graph.replay()
+        return self._loss
+
+    def stage_inputs(self, *inputs: torch.Tensor) -> None:
+        """Copy dynamic values into stable graph input allocations."""
+
         if len(inputs) != len(self._inputs):
             raise ValueError("static input count changed")
         for source, destination, signature in zip(
@@ -177,7 +271,13 @@ class StaticCudaMicrobatch:
                     f"expected {signature}, received {actual}"
                 )
             destination.copy_(source)
-        self._forward_graph.replay()
+
+    def replay_staged(self) -> torch.Tensor:
+        """Replay a joint graph after inputs have been staged explicitly."""
+
+        if self._joint_graph is None:
+            raise RuntimeError("separate graphs do not expose joint staged replay")
+        self._joint_graph.replay()
         return self._loss
 
     def replay_backward(self) -> None:
@@ -189,23 +289,19 @@ class StaticCudaMicrobatch:
 
     def replay(self, *inputs: torch.Tensor) -> torch.Tensor:
         if self._joint_graph is not None:
-            if len(inputs) != len(self._inputs):
-                raise ValueError("static input count changed")
-            for source, destination, signature in zip(
-                inputs, self._inputs, self._signatures
-            ):
-                actual = TensorSignature(tuple(source.shape), source.dtype, source.device)
-                if actual != signature:
-                    raise ValueError(
-                        "static input signature changed: "
-                        f"expected {signature}, received {actual}"
-                    )
-                destination.copy_(source)
-            self._joint_graph.replay()
-            return self._loss
+            self.stage_inputs(*inputs)
+            return self.replay_staged()
         loss = self.replay_forward(*inputs)
         self.replay_backward()
         return loss
+
+    def close(self) -> None:
+        """Release graph-owned tensors and pools after the final replay."""
+
+        self._loss = None
+        self._joint_graph = None
+        self._forward_graph = None
+        self._backward_graph = None
 
     @property
     def signatures(self) -> tuple[TensorSignature, ...]:

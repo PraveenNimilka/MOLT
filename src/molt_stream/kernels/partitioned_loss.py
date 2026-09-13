@@ -185,6 +185,27 @@ def exact_partitioned_linear_cross_entropy(
     if precompute_frozen_gradient:
         if weight.requires_grad:
             raise ValueError("Gradient precomputation requires a frozen classifier")
+        if not torch.is_grad_enabled() or not hidden.requires_grad:
+            if backend in {"auto", "triton"}:
+                from molt_stream.kernels.frozen_linear_cross_entropy import (
+                    frozen_linear_cross_entropy_loss_only,
+                    triton_frozen_loss_supported,
+                )
+
+                if triton_frozen_loss_supported(hidden, weight):
+                    return frozen_linear_cross_entropy_loss_only(
+                        hidden,
+                        weight,
+                        targets,
+                        chunk_size,
+                    )
+                if backend == "triton":
+                    raise RuntimeError(
+                        "Triton frozen-loss backend is unavailable for these tensors"
+                    )
+            return _ExactPartitionedLinearCrossEntropy.apply(
+                hidden, weight, targets, chunk_size
+            )
         if backend in {"auto", "triton"}:
             from molt_stream.kernels.frozen_linear_cross_entropy import (
                 frozen_linear_cross_entropy,

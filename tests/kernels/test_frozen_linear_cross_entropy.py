@@ -8,6 +8,28 @@ from molt_stream.kernels.frozen_linear_cross_entropy import frozen_linear_cross_
 from molt_stream.kernels.partitioned_loss import exact_partitioned_linear_cross_entropy
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_large_vocabulary_repeated_calls_are_reproducible() -> None:
+    from molt_stream.kernels.frozen_linear_cross_entropy import (
+        _analytical_frozen_head_forward,
+        _triton_frozen_head_forward,
+    )
+
+    torch.manual_seed(1337)
+    hidden = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+    weight = torch.randn(151936, 128, device="cuda", dtype=torch.bfloat16) * 0.1
+    targets = torch.randint(151936, (256,), device="cuda")
+    reference_loss, reference_grad = _triton_frozen_head_forward(hidden, weight, targets, 96)
+    expected = F.cross_entropy(F.linear(hidden, weight).float(), targets)
+    torch.testing.assert_close(reference_loss, expected, rtol=1e-5, atol=1e-5)
+    _, expected_grad = _analytical_frozen_head_forward(hidden, weight, targets, 96)
+    torch.testing.assert_close(reference_grad, expected_grad, rtol=0, atol=2e-3)
+    for _ in range(20):
+        loss, grad = _triton_frozen_head_forward(hidden, weight, targets, 96)
+        torch.testing.assert_close(loss, reference_loss, rtol=1e-6, atol=1e-6)
+        assert torch.equal(grad, reference_grad)
+
+
 def test_opcheck_cpu() -> None:
     h = torch.randn(8, 32, dtype=torch.float32, requires_grad=True)
     w = torch.randn(64, 32, dtype=torch.float32)
@@ -167,3 +189,29 @@ def test_triton_accepts_fp32_hidden_with_bf16_frozen_cache() -> None:
     loss.backward()
     assert h.grad is not None and h.grad.dtype == torch.float32
     assert torch.isfinite(loss) and torch.isfinite(h.grad).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_loss_only_triton_path_is_bit_exact_to_training_loss() -> None:
+    torch.manual_seed(91)
+    hidden = torch.randn(16, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    weight = torch.randn(151936, 64, device="cuda", dtype=torch.bfloat16)
+    targets = torch.randint(151936, (16,), device="cuda")
+    training_loss = exact_partitioned_linear_cross_entropy(
+        hidden,
+        weight,
+        targets,
+        8,
+        precompute_frozen_gradient=True,
+        backend="triton",
+    )
+    with torch.no_grad():
+        evaluation_loss = exact_partitioned_linear_cross_entropy(
+            hidden,
+            weight,
+            targets,
+            8,
+            precompute_frozen_gradient=True,
+            backend="triton",
+        )
+    assert torch.equal(evaluation_loss, training_loss.detach())
