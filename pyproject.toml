@@ -21,7 +21,7 @@ dependencies = [
   "nvidia-ml-py>=13.580.65,<14",
   "packaging>=24,<27",
   "psutil>=7,<8",
-  "torch>=2.8,<2.9",
+  "torch>=2.8,<2.15",
 ]
 
 [project.urls]
@@ -33,7 +33,7 @@ Changelog = "https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/releases/0
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4.0", "ruff>=0.13,<1"]
-windows-fusion = ["torch==2.8.0", "triton-windows>=3.4,<3.5; sys_platform == 'win32'"]
+windows-fusion = ["torch==2.14.0", "triton-windows>=3.4,<3.5; sys_platform == 'win32'"]
 qlora = [
   "accelerate>=1.10,<2",
   "bitsandbytes>=0.48,<1",
