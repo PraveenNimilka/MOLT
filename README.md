@@ -19,35 +19,31 @@ Validate workloads before production use.
 
 ## Current evidence
 
-On the development RTX 4060 Laptop GPU, the published six-pair matched
-diagnostic screens produced the following means against the tested Unsloth
-configuration:
-
-| Model family | Training time | Board energy | PyTorch allocator peak |
-| --- | ---: | ---: | ---: |
-| Qwen | 38.42% lower | 21.90% lower | 8.13% lower |
-| Llama-family | 46.54% lower | 39.23% lower | 5.66% lower |
-| Gemma | 73.38% lower | 47.51% lower | 0.47% lower |
-
-![Diagnostic reductions in elapsed time, board energy, and allocator peak, with 95% paired confidence intervals where applicable](https://raw.githubusercontent.com/PraveenNimilka/MOLT/v0.12.0/docs/assets/benchmark-diagnostic-0.11.0a3.svg)
-
-See the [single reproduction page](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/REPRODUCE_DIAGNOSTIC.md),
-[calculation method, and machine-readable aggregate](https://github.com/PraveenNimilka/MOLT/blob/v0.12.0/docs/benchmarks/README.md).
-
-Every recorded pair favored MOLT for elapsed time and energy. These results are
-diagnostic evidence, not a universal performance claim: graphics clocks were not
-locked, one Gemma competitor arm had a power-limit transient, Soup has not yet
-been compared, and 7B/8B endurance and independent reproduction remain open.
-
-Version 0.12.0 also includes opt-in experimental work for low-overhead update
+Version 0.12.0 includes opt-in experimental work for low-overhead update
 attribution, exact frozen-vocabulary loss, scheduled NF4 backward execution,
 bounded gated-MLP replay/offload, graph-memory accounting, and thermal pacing.
-In the latest clean one-million-target Qwen 1.5B seed screen, the qualified
-candidate was 23.00% faster end to end, delivered 38.45% higher training
-throughput, used 1.07% less measured board energy, and reduced allocated and
-reserved VRAM by 12.09% and 9.37%. It did not win every axis: sampled whole-GPU
-peak was 4.65% higher and peak temperature was 7 C higher. This is a single-seed
-development result, not a release-wide or universal superiority claim.
+
+The newest qualified benchmark is a clean one-million-target Qwen 1.5B,
+seed-2027 pair on the development RTX 4060 Laptop GPU. Both arms used the same
+initial adapter fingerprint, Unsloth-first order, common startup controls, AC
+power, and an enforced 140 W GPU power limit.
+
+| Metric | MOLT 0.12.0 candidate | Tested Unsloth arm | Relative result |
+| --- | ---: | ---: | ---: |
+| End-to-end session | 1,103.136 s | 1,432.556 s | **23.00% lower** |
+| Training throughput | 1,063.488 targets/s | 768.152 targets/s | **38.45% higher** |
+| Measured board energy | 63,109.271 J | 63,791.486 J | **1.07% lower** |
+| Peak allocated VRAM | 1,628,883,456 B | 1,852,898,304 B | **12.09% lower** |
+| Peak reserved VRAM | 1,805,647,872 B | 1,992,294,400 B | **9.37% lower** |
+| Sampled whole-GPU peak | 2,732,990,464 B | 2,611,511,296 B | **4.65% higher** |
+| Peak GPU temperature | 78 C | 71 C | **7 C higher** |
+| Final validation NLL | 2.441494 | 2.516915 | Lower observed MOLT NLL |
+
+This is complete single-seed development evidence, not a universal superiority
+claim. Graphics clocks could not be locked, framework versions differed between
+arms, and whole-GPU memory includes driver-visible allocations outside the
+PyTorch allocator. Five-seed, both-order, controlled-clock endurance, Soup and
+7B/8B comparisons, and independent reproduction remain open.
 
 Public documentation covers supported interfaces, observable behavior, and
 reproducible measurements. Internal optimization rationale and development
