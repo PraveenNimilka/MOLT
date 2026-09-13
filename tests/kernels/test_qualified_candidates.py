@@ -9,9 +9,17 @@ from molt_stream.kernels.split_frozen_loss import (
 )
 
 
+def test_split_loss_imports_without_optional_triton():
+    hidden = torch.empty(1, 8, 16)
+    weight = torch.empty(32, 16)
+    targets = torch.zeros(1, 8, dtype=torch.long)
+    assert not split_frozen_head_supported(hidden, weight, targets, 96)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("shape", [(17, 64, 317), (256, 1536, 151936)])
 def test_split_loss_matches_separated_reference_and_replays(shape):
+    pytest.importorskip("triton")
     from molt_stream.kernels.frozen_linear_cross_entropy import (
         _separated_triton_frozen_head_forward,
         _triton_frozen_head_forward,

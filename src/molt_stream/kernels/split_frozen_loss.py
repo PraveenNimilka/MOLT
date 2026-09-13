@@ -2,13 +2,28 @@
 from __future__ import annotations
 
 import torch
-import triton
-import triton.language as tl
 from torch.nn import functional as F
 
+from molt_stream.core.errors import CapabilityError
 from molt_stream.kernels.compiler import configure_windows_compiler_cache
 
 configure_windows_compiler_cache()
+
+try:
+    import triton
+    import triton.language as tl
+
+    _TRITON_AVAILABLE = True
+except ImportError:
+    triton = None
+    tl = None
+    _TRITON_AVAILABLE = False
+
+
+def _triton_jit(function):
+    """Keep the module importable when the optional fusion extra is absent."""
+
+    return triton.jit(function) if _TRITON_AVAILABLE else function
 
 
 _QUALIFIED_WEIGHT_SHAPE = (151_936, 1_536)
@@ -25,7 +40,8 @@ def split_frozen_head_supported(
     """Restrict automatic dispatch to the fully qualified Qwen1.5B geometry."""
 
     return bool(
-        hidden.device.type == "cuda"
+        _TRITON_AVAILABLE
+        and hidden.device.type == "cuda"
         and weight.device == hidden.device
         and targets.device == hidden.device
         and hidden.dtype == torch.bfloat16
@@ -37,7 +53,7 @@ def split_frozen_head_supported(
     )
 
 
-@triton.jit
+@_triton_jit
 def _statistics(logits, targets, losses, maximum, denominator, N: tl.constexpr,
                 TOTAL: float, BLOCK: tl.constexpr):
     row = tl.program_id(0)
@@ -60,7 +76,7 @@ def _statistics(logits, targets, losses, maximum, denominator, N: tl.constexpr,
     tl.store(denominator + row, d)
 
 
-@triton.jit
+@_triton_jit
 def _overwrite_gradient(logits, targets, maximum, denominator, N: tl.constexpr,
                         TOTAL: float, BLOCK: tl.constexpr):
     row, block = tl.program_id(0), tl.program_id(1)
@@ -82,6 +98,8 @@ def split_frozen_head_forward(hidden, weight, targets, chunk_size):
     algebra and rounding boundaries match the separated-buffer loss; exact
     numerical equivalence remains a tested requirement, not an assumption.
     """
+    if not _TRITON_AVAILABLE:
+        raise CapabilityError("split frozen-vocabulary loss requires Triton CUDA")
     flat = hidden.flatten(0, -2).contiguous()
     labels = targets.reshape(-1).contiguous()
     count = labels.numel()
