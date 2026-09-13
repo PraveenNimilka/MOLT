@@ -40,7 +40,7 @@ qlora = [
   "peft>=0.17,<1",
   "transformers>=5,<6",
 ]
-data = ["pyarrow>=19,<24"]
+data = ["pyarrow>=19,<26"]
 windows-monitoring = ["WMI==1.5.1; sys_platform == 'win32'"]
 
 [project.scripts]
